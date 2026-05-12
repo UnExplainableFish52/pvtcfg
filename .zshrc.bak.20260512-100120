@@ -1,0 +1,46 @@
+# ============================
+# loki ~/.zshrc
+# ============================
+
+# --- Powerlevel10k instant prompt (optional) ---
+# Keep this close to the top. Anything that needs user input must go above it.
+# if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+#   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+# fi
+
+# --- Oh My Zsh base ---
+export ZSH="$HOME/.oh-my-zsh"
+
+# Theme (kept exactly as your original)
+ZSH_THEME="powerlevel10k/powerlevel10k"
+
+# Plugins (kept exactly as your original)
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
+
+# Load Oh My Zsh (kept)
+source "$ZSH/oh-my-zsh.sh"
+
+# --- Powerlevel10k config (kept) ---
+# To customize prompt: p10k configure OR edit ~/.p10k.zsh
+[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"
+
+# ============================
+# Modular daily config (loki)
+# ============================
+# Folder containing your modules.
+# Modules are safe: they load only if the file exists.
+ZSHCFG_DIR="$HOME/.zsh_config"
+
+# Ensure the directory exists (prevents errors)
+[[ -d "$ZSHCFG_DIR" ]] || mkdir -p "$ZSHCFG_DIR"
+
+# Load modules in a stable order:
+# env -> options -> aliases -> functions -> keybinds -> local overrides
+[[ -r "$ZSHCFG_DIR/env.zsh" ]]       && source "$ZSHCFG_DIR/env.zsh"
+[[ -r "$ZSHCFG_DIR/options.zsh" ]]   && source "$ZSHCFG_DIR/options.zsh"
+[[ -r "$ZSHCFG_DIR/aliases.zsh" ]]   && source "$ZSHCFG_DIR/aliases.zsh"
+[[ -r "$ZSHCFG_DIR/functions.zsh" ]] && source "$ZSHCFG_DIR/functions.zsh"
+[[ -r "$ZSHCFG_DIR/keybinds.zsh" ]]  && source "$ZSHCFG_DIR/keybinds.zsh"
+
+# Private/machine-local overrides (DO NOT commit secrets)
+[[ -r "$ZSHCFG_DIR/local.zsh" ]]     && source "$ZSHCFG_DIR/local.zsh"

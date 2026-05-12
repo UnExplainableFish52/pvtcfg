@@ -1,0 +1,48 @@
+# ============================
+# loki keybinds (emacs + history search + fzf extras)
+# ============================
+
+# emacs mode keybindings
+bindkey -e
+
+# Up/Down: search history by current prefix (nice for repeating similar commands)
+autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
+zle -N up-line-or-beginning-search
+zle -N down-line-or-beginning-search
+bindkey '^[[A' up-line-or-beginning-search
+bindkey '^[[B' down-line-or-beginning-search
+
+# ============================
+# fzf integration
+# ============================
+if command -v fzf >/dev/null 2>&1; then
+  # --- 1) Keep YOUR custom Ctrl+R history picker (do not override it) ---
+  fzf-history-widget() {
+    local selected
+    selected=$(
+      fc -rl 1 |
+      sed 's/^ *[0-9]* *//' |
+      fzf --height 40% --reverse --prompt='history> ' --tiebreak=index
+    ) || return
+    LBUFFER+="$selected"
+  }
+  zle -N fzf-history-widget
+  bindkey '^R' fzf-history-widget
+
+  # --- 2) Load fzf keybindings/completion if present (but protect Ctrl+R) ---
+  # Kali/Debian commonly ships these example scripts here:
+  local _fzf_kb="/usr/share/doc/fzf/examples/key-bindings.zsh"
+  local _fzf_comp="/usr/share/doc/fzf/examples/completion.zsh"
+
+  # Source completion first (safe)
+  if [[ -f "$_fzf_comp" ]]; then
+    source "$_fzf_comp"
+  fi
+
+  # Source keybindings, but immediately re-bind Ctrl+R back to your widget
+  # This gives you Ctrl+T (file insert) and Alt+C (directory jump) from fzf.
+  if [[ -f "$_fzf_kb" ]]; then
+    source "$_fzf_kb"
+    bindkey '^R' fzf-history-widget
+  fi
+fi

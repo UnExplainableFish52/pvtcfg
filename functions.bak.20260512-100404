@@ -1,0 +1,254 @@
+# ---- tp: semantic teleport menu + fuzzy search ----
+# Usage:
+#   tp                 -> interactive menu
+#   tp c|i|t|p...      -> direct jump (single-key)
+#   tp <text>          -> fuzzy search among known dirs (non-interactive best match)
+#   tp -s <text>       -> list matches
+#   tp -f              -> interactive picker (requires fzf)
+
+# Resolve Documents dir robustly (XDG aware)
+_tp_docs_dir() {
+  local docs=""
+  if command -v xdg-user-dir >/dev/null 2>&1; then
+    docs="$(xdg-user-dir DOCUMENTS 2>/dev/null)"
+  fi
+  if [[ -z "$docs" || "$docs" == "$HOME" ]]; then
+    docs="$HOME/Documents"
+  fi
+  print -r -- "$docs"
+}
+
+_tp_mkdir() { command mkdir -p -- "$1" 2>/dev/null; }
+
+# Empty directory contents (includes nested dirs). Keeps the directory itself.
+_tp_empty_dir_contents() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  command rm -rf -- "${dir:?}/"* "${dir:?}"/.[!.]* "${dir:?}"/..?* 2>/dev/null
+}
+
+# Build candidate list: "key<TAB>label<TAB>path"
+_tp_candidates() {
+  local docs="$(_tp_docs_dir)"
+  local codes="$docs/codes"
+  local temp="$codes/temp"
+  local notes="$docs/notes"
+
+  print -r -- "c\tcodes\t$codes"
+  print -r -- "p\tcodes\t$codes"
+  print -r -- "t\ttemp\t$temp"
+  print -r -- "i\tzsh_config\t$HOME/.zsh_config"
+  print -r -- "d\tdownloads\t$HOME/Downloads"
+  print -r -- "n\tnotes\t$notes"
+  print -r -- "b\tlocal_bin\t$HOME/.local/bin"
+  print -r -- "s\tssh\t$HOME/.ssh"
+  print -r -- "h\thome\t$HOME"
+}
+
+# Non-interactive fuzzy scorer: prefers substring matches; shorter label/path wins.
+# Returns best matching path for a query, or empty.
+_tp_best_match_path() {
+  local q="$1"
+  local bestPath=""
+  local bestScore=999999
+
+  [[ -z "$q" ]] && return 1
+  q="${q:l}"  # lowercase
+
+  local line key label path hay score
+  while IFS=$'\t' read -r key label path; do
+    hay="${key} ${label} ${path}"
+    hay="${hay:l}"
+
+    # If query is substring, score by (position + length); else skip
+    local pos
+    pos="$(awk -v a="$hay" -v b="$q" 'BEGIN{print index(a,b)}' 2>/dev/null)"
+    [[ -z "$pos" ]] && continue
+    (( pos == 0 )) && continue
+
+    # Lower is better
+    score=$(( pos + ${#hay} ))
+    if (( score < bestScore )); then
+      bestScore="$score"
+      bestPath="$path"
+    fi
+  done < <(_tp_candidates)
+
+  [[ -n "$bestPath" ]] && print -r -- "$bestPath"
+}
+
+# List matches for a query (for -s mode)
+_tp_list_matches() {
+  local q="$1"
+  q="${q:l}"
+  local key label path hay
+  while IFS=$'\t' read -r key label path; do
+    hay="${key} ${label} ${path}"
+    hay="${hay:l}"
+    if [[ "$hay" == *"$q"* ]]; then
+      print -P "%F{cyan}%B${key}%b%f  %F{yellow}${label}%f  %F{green}${path}%f"
+    fi
+  done < <(_tp_candidates)
+}
+
+tp() {
+  local docs="$(_tp_docs_dir)"
+  local codes="$docs/codes"
+  local temp="$codes/temp"
+
+  # Ensure base dirs exist
+  _tp_mkdir "$codes"
+  _tp_mkdir "$temp"
+
+  local arg1="$1"
+  local arg2="$2"
+
+  # ---- flags ----
+  if [[ "$arg1" == "-f" ]]; then
+    if ! command -v fzf >/dev/null 2>&1; then
+      print -P "%F{red}%Bfzf not found.%b%f Install it or use: tp <text>"
+      return 1
+    fi
+
+    local picked
+    picked="$(_tp_candidates | fzf --with-nth=1,2,3 --delimiter=$'\t' --prompt='tp> ' --ansi)"
+    [[ -z "$picked" ]] && return 0
+
+    local key label path
+    IFS=$'\t' read -r key label path <<< "$picked"
+
+    # Handle temp empty prompt if selecting temp
+    if [[ "$key" == "t" ]]; then
+      print -P "%F{yellow}%BTemp directory:%b%f $path"
+      echo -n "Empty temp contents (including subfolders) before cd? (y/N): "
+      local ans; read -r ans
+      if [[ "$ans" == [yY] ]]; then
+        _tp_empty_dir_contents "$path"
+        print -P "%F{green}%BTemp emptied.%b%f"
+      fi
+    fi
+
+    builtin cd -- "$path"
+    return $?
+  fi
+
+  if [[ "$arg1" == "-s" ]]; then
+    [[ -z "$arg2" ]] && { print -P "%F{red}%BUsage:%b%f tp -s <text>"; return 1; }
+    _tp_list_matches "$arg2"
+    return 0
+  fi
+
+  # ---- direct single-key ----
+  if [[ -n "$arg1" && ${#arg1} -eq 1 ]]; then
+    case "$arg1" in
+      c|p) builtin cd -- "$codes"; return $? ;;
+      i) builtin cd -- "$HOME/.zsh_config"; return $? ;;
+      d) builtin cd -- "$HOME/Downloads"; return $? ;;
+      n) _tp_mkdir "$docs/notes"; builtin cd -- "$docs/notes"; return $? ;;
+      b) _tp_mkdir "$HOME/.local/bin"; builtin cd -- "$HOME/.local/bin"; return $? ;;
+      s) builtin cd -- "$HOME/.ssh"; return $? ;;
+      h) builtin cd -- "$HOME"; return $? ;;
+      t)
+        print -P "%F{yellow}%BTemp directory:%b%f $temp"
+        echo -n "Empty temp contents (including subfolders) before cd? (y/N): "
+        local ans; read -r ans
+        if [[ "$ans" == [yY] ]]; then
+          _tp_empty_dir_contents "$temp"
+          print -P "%F{green}%BTemp emptied.%b%f"
+        fi
+        builtin cd -- "$temp"
+        return $?
+        ;;
+      q|"") return 0 ;;
+    esac
+  fi
+
+  # ---- fuzzy text mode ----
+  if [[ -n "$arg1" ]]; then
+    local best="$(_tp_best_match_path "$arg1")"
+    if [[ -z "$best" ]]; then
+      print -P "%F{red}%BNo match for:%b%f $arg1"
+      print -P "%F{yellow}%BTip:%b%f try: tp -s $arg1  (to see matches) or tp -f (interactive)"
+      return 1
+    fi
+
+    # If fuzzy matched temp, still ask to empty
+    if [[ "$best" == */temp ]]; then
+      print -P "%F{yellow}%BTemp directory:%b%f $best"
+      echo -n "Empty temp contents (including subfolders) before cd? (y/N): "
+      local ans; read -r ans
+      if [[ "$ans" == [yY] ]]; then
+        _tp_empty_dir_contents "$best"
+        print -P "%F{green}%BTemp emptied.%b%f"
+      fi
+    fi
+
+    builtin cd -- "$best"
+    return $?
+  fi
+
+  # ---- menu mode ----
+  print -P "%F{cyan}%Btp menu:%b%f"
+  print "  c  -> ${codes}"
+  print "  p  -> ${codes}"
+  print "  t  -> ${temp} (asks to empty first)"
+  print "  i  -> $HOME/.zsh_config"
+  print "  d  -> $HOME/Downloads"
+  print "  n  -> ${docs}/notes"
+  print "  b  -> $HOME/.local/bin"
+  print "  s  -> $HOME/.ssh"
+  print "  h  -> $HOME"
+  print "  q  -> quit"
+  print "  tip: tp <text> (fuzzy) | tp -s <text> (list) | tp -f (fzf picker)"
+  echo -n "Choose: "
+  local choice; read -r choice
+  tp "$choice"
+}
+
+# ---- rand / random / rint: random integer generator ----
+# Usage:
+#   rand              -> 1..100
+#   rand N            -> 1..N
+#   rand A B          -> A..B  (order doesn't matter)
+#
+# Integer = whole number (no decimals)
+
+_rint_core() {
+  local a="$1"
+  local b="$2"
+
+  if (( a > b )); then
+    local tmp="$a"; a="$b"; b="$tmp"
+  fi
+
+  local range=$(( b - a + 1 ))
+  if (( range <= 0 )); then
+    print -P "%F{red}%BInvalid range.%b%f"
+    return 1
+  fi
+
+  # Better spread than plain RANDOM
+  local r=$(( (RANDOM << 15) ^ RANDOM ))
+  local val=$(( a + (r % range) ))
+  print -- "$val"
+}
+
+rand() {
+  if (( $# == 0 )); then
+    _rint_core 1 100
+  elif (( $# == 1 )); then
+    [[ "$1" == <-> ]] || { print -P "%F{red}%BUsage:%b%f rand [max] or rand [min] [max]"; return 1; }
+    (( $1 >= 1 )) || { print -P "%F{red}%BMax must be >= 1%b%f"; return 1; }
+    _rint_core 1 "$1"
+  elif (( $# == 2 )); then
+    [[ "$1" == -<-> || "$1" == <-> ]] || { print -P "%F{red}%BIntegers only.%b%f"; return 1; }
+    [[ "$2" == -<-> || "$2" == <-> ]] || { print -P "%F{red}%BIntegers only.%b%f"; return 1; }
+    _rint_core "$1" "$2"
+  else
+    print -P "%F{red}%BUsage:%b%f rand | rand MAX | rand MIN MAX"
+    return 1
+  fi
+}
+
+random() { rand "$@"; }
+rint()   { rand "$@"; }

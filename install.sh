@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 # ============================================================
 #  Loki Shell Config Installer
-#  Applies Loki's ZSH configuration from the pvtcfg repository
+#  Applies Loki's ZSH configuration from bundled files.
 #  https://github.com/UnExplainableFish52/pvtcfg
+#
+#  USAGE:
+#    chmod +x install.sh && ./install.sh
+#
+#  The installer expects the following files to be present
+#  in the SAME directory as this script:
+#    .p10k.zsh
+#    .zshrc.bak.*
+#    aliases.bak.*
+#    env.bak.*
+#    functions.bak.*
+#    keybinds.bak.*
+#    local.bak.*
+#    options.bak.*
+#    night_temple_samurai.jpg   (optional wallpaper)
+#    secondwallpp.jpg           (optional wallpaper)
 # ============================================================
 
 set -euo pipefail
@@ -21,11 +37,15 @@ MAGENTA='\033[1;35m'
 WHITE='\033[1;37m'
 
 # ---------------------------
+# Resolve script directory
+# ---------------------------
+# All bundled config files live next to this script.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ---------------------------
 # Config
 # ---------------------------
-REPO_URL="https://github.com/UnExplainableFish52/pvtcfg.git"
-CLONE_DIR="$HOME/Documents/pvtcfg-install-tmp"
-BACKUP_DIR="$HOME/Documents/shell/old-config"
+BACKUP_DIR="$HOME/.config/loki-shell-backup"
 ZSH_CONFIG_DIR="$HOME/.zsh_config"
 PICTURES_DIR="$HOME/Pictures"
 
@@ -37,17 +57,24 @@ success() { echo -e "${GREEN}[✓]${RESET} $1"; }
 warn()    { echo -e "${YELLOW}[!]${RESET} $1"; }
 fail()    { echo -e "${RED}[✗]${RESET} $1"; exit 1; }
 
-# Copy a single file from the cloned repo to its destination.
-# Usage: install_file <glob_pattern> <destination_path>
-# The glob pattern is matched inside $CLONE_DIR.
+# Resolve a single file from a glob pattern in SCRIPT_DIR.
+# Returns the first match or empty string.
+resolve_file() {
+    local pattern="$1"
+    local match
+    match=$(find "$SCRIPT_DIR" -maxdepth 1 -name "$pattern" -print -quit 2>/dev/null)
+    echo "$match"
+}
+
+# Copy a bundled file to a destination.
+# Usage: install_file <glob_pattern> <destination_path> <label>
 install_file() {
     local pattern="$1"
     local dest="$2"
     local label="$3"
 
-    # Expand the glob (take the first match)
     local src
-    src=$(find "$CLONE_DIR" -maxdepth 1 -name "$pattern" -print -quit 2>/dev/null)
+    src="$(resolve_file "$pattern")"
 
     if [[ -z "$src" ]]; then
         warn "Source not found for pattern: ${pattern} -- skipping ${label}"
@@ -71,29 +98,212 @@ print_banner() {
     echo "  ╚═══════════════════════════════════════════════╝"
     echo -e "${RESET}"
     echo -e "  ${DIM}ZSH configuration by Loki${RESET}"
-    echo -e "  ${DIM}${REPO_URL}${RESET}"
+    echo -e "  ${DIM}https://github.com/UnExplainableFish52/pvtcfg${RESET}"
     echo ""
 }
 
 # ---------------------------
-# Prerequisite checks
+# Elevate privileges
 # ---------------------------
-check_prerequisites() {
-    info "Checking prerequisites..."
-
-    if ! command -v git &>/dev/null; then
-        fail "git is not installed. Please install git first and re-run this script."
-    fi
-    success "git found"
-
-    if ! command -v zsh &>/dev/null; then
-        warn "zsh is not installed. The config files will be copied,"
-        warn "but they won't work until you install zsh."
+elevate_privileges() {
+    if [[ "$EUID" -ne 0 ]]; then
+        info "This installer needs elevated privileges to install packages."
+        echo -e "  ${DIM}You will be prompted for your sudo password.${RESET}"
         echo ""
+
+        if ! sudo -v 2>/dev/null; then
+            fail "Failed to obtain sudo privileges. Please run with: sudo ./install.sh"
+        fi
+
+        success "Sudo privileges acquired"
+
+        # Keep sudo alive in the background for the duration of the script
+        while true; do sudo -n true; sleep 50; kill -0 "$$" || exit; done 2>/dev/null &
+        SUDO_KEEPALIVE_PID=$!
+        trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null' EXIT
     else
-        success "zsh found"
+        success "Running as root"
     fi
 
+    echo ""
+}
+
+# ---------------------------
+# Detect package manager
+# ---------------------------
+detect_pkg_manager() {
+    if command -v apt-get &>/dev/null; then
+        PKG_MANAGER="apt"
+    elif command -v dnf &>/dev/null; then
+        PKG_MANAGER="dnf"
+    elif command -v pacman &>/dev/null; then
+        PKG_MANAGER="pacman"
+    elif command -v zypper &>/dev/null; then
+        PKG_MANAGER="zypper"
+    elif command -v apk &>/dev/null; then
+        PKG_MANAGER="apk"
+    else
+        PKG_MANAGER="unknown"
+    fi
+}
+
+# ---------------------------
+# Install dependencies
+# ---------------------------
+install_dependencies() {
+    info "Checking and installing dependencies..."
+    echo ""
+
+    detect_pkg_manager
+
+    local packages_to_install=()
+
+    # Check for zsh
+    if ! command -v zsh &>/dev/null; then
+        packages_to_install+=("zsh")
+    else
+        success "zsh is already installed"
+    fi
+
+    # Check for git
+    if ! command -v git &>/dev/null; then
+        packages_to_install+=("git")
+    else
+        success "git is already installed"
+    fi
+
+    # Check for curl
+    if ! command -v curl &>/dev/null; then
+        packages_to_install+=("curl")
+    else
+        success "curl is already installed"
+    fi
+
+    # Install missing packages
+    if [[ ${#packages_to_install[@]} -gt 0 ]]; then
+        info "Installing: ${packages_to_install[*]}"
+
+        case "$PKG_MANAGER" in
+            apt)
+                sudo apt-get update -qq
+                sudo apt-get install -y -qq "${packages_to_install[@]}"
+                ;;
+            dnf)
+                sudo dnf install -y -q "${packages_to_install[@]}"
+                ;;
+            pacman)
+                sudo pacman -Sy --noconfirm --needed "${packages_to_install[@]}"
+                ;;
+            zypper)
+                sudo zypper install -y -n "${packages_to_install[@]}"
+                ;;
+            apk)
+                sudo apk add --no-cache "${packages_to_install[@]}"
+                ;;
+            *)
+                warn "Unknown package manager. Please install manually: ${packages_to_install[*]}"
+                ;;
+        esac
+
+        # Verify installation
+        for pkg in "${packages_to_install[@]}"; do
+            if command -v "$pkg" &>/dev/null; then
+                success "${pkg} installed successfully"
+            else
+                warn "${pkg} may not have installed correctly"
+            fi
+        done
+    fi
+
+    echo ""
+
+    # Install Oh My Zsh if not present
+    if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
+        info "Installing Oh My Zsh..."
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+        success "Oh My Zsh installed"
+    else
+        success "Oh My Zsh is already installed"
+    fi
+
+    # Install Powerlevel10k theme if not present
+    local p10k_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
+    if [[ ! -d "$p10k_dir" ]]; then
+        info "Installing Powerlevel10k theme..."
+        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$p10k_dir" 2>&1 | while read -r line; do
+            echo -e "  ${DIM}${line}${RESET}"
+        done
+        success "Powerlevel10k installed"
+    else
+        success "Powerlevel10k is already installed"
+    fi
+
+    # Install zsh-autosuggestions if not present
+    local autosug_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
+    if [[ ! -d "$autosug_dir" ]]; then
+        info "Installing zsh-autosuggestions plugin..."
+        git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git "$autosug_dir" 2>&1 | while read -r line; do
+            echo -e "  ${DIM}${line}${RESET}"
+        done
+        success "zsh-autosuggestions installed"
+    else
+        success "zsh-autosuggestions is already installed"
+    fi
+
+    # Install zsh-syntax-highlighting if not present
+    local synhl_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
+    if [[ ! -d "$synhl_dir" ]]; then
+        info "Installing zsh-syntax-highlighting plugin..."
+        git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git "$synhl_dir" 2>&1 | while read -r line; do
+            echo -e "  ${DIM}${line}${RESET}"
+        done
+        success "zsh-syntax-highlighting installed"
+    else
+        success "zsh-syntax-highlighting is already installed"
+    fi
+
+    echo ""
+}
+
+# ---------------------------
+# Verify bundled files exist
+# ---------------------------
+verify_bundled_files() {
+    info "Verifying bundled config files in: ${SCRIPT_DIR}/"
+    echo ""
+
+    local missing=0
+
+    # Check for the essential files
+    local required_patterns=(
+        ".zshrc.bak.*"
+        ".p10k.zsh"
+        "aliases.bak.*"
+        "env.bak.*"
+        "functions.bak.*"
+        "keybinds.bak.*"
+        "local.bak.*"
+        "options.bak.*"
+    )
+
+    for pattern in "${required_patterns[@]}"; do
+        local found
+        found="$(resolve_file "$pattern")"
+        if [[ -n "$found" ]]; then
+            success "Found: $(basename "$found")"
+        else
+            warn "Missing: ${pattern}"
+            ((missing++))
+        fi
+    done
+
+    echo ""
+
+    if [[ $missing -gt 0 ]]; then
+        fail "Missing ${missing} required config file(s). Ensure all files are in: ${SCRIPT_DIR}/"
+    fi
+
+    success "All required config files are present"
     echo ""
 }
 
@@ -114,8 +324,8 @@ ask_consent() {
     echo -e "    ${WHITE}~/.zsh_config/local.zsh${RESET}"
     echo -e "    ${WHITE}~/.zsh_config/options.zsh${RESET}"
     echo ""
-    echo -e "  Your existing configs will be backed up to:"
-    echo -e "    ${CYAN}${BACKUP_DIR}/${RESET}"
+    echo -e "  Your existing configs will be safely backed up to:"
+    echo -e "    ${CYAN}${BACKUP_DIR}/<timestamp>/${RESET}"
     echo ""
     echo -e "  ${DIM}Make sure you understand what you are doing.${RESET}"
     echo ""
@@ -152,58 +362,35 @@ backup_existing() {
     if [[ -f "$HOME/.zshrc" ]]; then
         cp "$HOME/.zshrc" "$backup_dest/zshrc"
         success "~/.zshrc"
-        ((backed_up++))
+        ((backed_up++)) || true
     fi
 
     # Back up ~/.p10k.zsh
     if [[ -f "$HOME/.p10k.zsh" ]]; then
         cp "$HOME/.p10k.zsh" "$backup_dest/p10k.zsh"
         success "~/.p10k.zsh"
-        ((backed_up++))
+        ((backed_up++)) || true
     fi
 
     # Back up all files in ~/.zsh_config/
     if [[ -d "$ZSH_CONFIG_DIR" ]]; then
+        mkdir -p "$backup_dest/zsh_config"
         local f
         for f in "$ZSH_CONFIG_DIR"/*.zsh; do
             if [[ -f "$f" ]]; then
-                cp "$f" "$backup_dest/"
+                cp "$f" "$backup_dest/zsh_config/"
                 success "$f"
-                ((backed_up++))
+                ((backed_up++)) || true
             fi
         done
     fi
 
     if [[ $backed_up -eq 0 ]]; then
-        warn "No existing config files found to back up."
+        warn "No existing config files found to back up (fresh install)."
     else
-        success "Backed up ${backed_up} file(s)"
+        success "Backed up ${backed_up} file(s) securely"
     fi
 
-    echo ""
-}
-
-# ---------------------------
-# Clone the repository
-# ---------------------------
-clone_repo() {
-    info "Cloning repository to: ${CLONE_DIR}/"
-
-    # Clean up if it exists from a previous run
-    if [[ -d "$CLONE_DIR" ]]; then
-        warn "Staging directory already exists. Removing it..."
-        rm -rf "$CLONE_DIR"
-    fi
-
-    git clone --depth 1 "$REPO_URL" "$CLONE_DIR" 2>&1 | while read -r line; do
-        echo -e "  ${DIM}${line}${RESET}"
-    done
-
-    if [[ ! -d "$CLONE_DIR" ]]; then
-        fail "Clone failed. Check your internet connection and try again."
-    fi
-
-    success "Repository cloned successfully"
     echo ""
 }
 
@@ -238,38 +425,73 @@ install_configs() {
 # Install wallpapers
 # ---------------------------
 install_wallpapers() {
-    info "Copying wallpapers to: ${PICTURES_DIR}/"
+    local has_wallpapers=false
 
-    mkdir -p "$PICTURES_DIR"
-
-    local copied=0
-
-    if [[ -f "$CLONE_DIR/night_temple_samurai.jpg" ]]; then
-        cp "$CLONE_DIR/night_temple_samurai.jpg" "$PICTURES_DIR/night_temple_samurai.jpg"
-        success "night_temple_samurai.jpg  -->  ${PICTURES_DIR}/"
-        ((copied++))
+    # Check if any wallpapers exist before printing the header
+    if [[ -f "$SCRIPT_DIR/night_temple_samurai.jpg" ]] || [[ -f "$SCRIPT_DIR/secondwallpp.jpg" ]]; then
+        has_wallpapers=true
     fi
 
-    if [[ -f "$CLONE_DIR/secondwallpp.jpg" ]]; then
-        cp "$CLONE_DIR/secondwallpp.jpg" "$PICTURES_DIR/twilight_landscape.jpg"
-        success "secondwallpp.jpg  -->  ${PICTURES_DIR}/twilight_landscape.jpg"
-        ((copied++))
-    fi
+    if [[ "$has_wallpapers" == true ]]; then
+        info "Copying wallpapers to: ${PICTURES_DIR}/"
+        mkdir -p "$PICTURES_DIR"
 
-    if [[ $copied -eq 0 ]]; then
-        warn "No wallpaper images found in the repository."
-    fi
+        if [[ -f "$SCRIPT_DIR/night_temple_samurai.jpg" ]]; then
+            cp "$SCRIPT_DIR/night_temple_samurai.jpg" "$PICTURES_DIR/night_temple_samurai.jpg"
+            success "night_temple_samurai.jpg  -->  ${PICTURES_DIR}/"
+        fi
 
-    echo ""
+        if [[ -f "$SCRIPT_DIR/secondwallpp.jpg" ]]; then
+            cp "$SCRIPT_DIR/secondwallpp.jpg" "$PICTURES_DIR/twilight_landscape.jpg"
+            success "secondwallpp.jpg  -->  ${PICTURES_DIR}/twilight_landscape.jpg"
+        fi
+
+        echo ""
+    fi
 }
 
 # ---------------------------
-# Cleanup
+# Set ZSH as default shell
 # ---------------------------
-cleanup() {
-    info "Cleaning up staging directory..."
-    rm -rf "$CLONE_DIR"
-    success "Removed ${CLONE_DIR}/"
+set_default_shell() {
+    local zsh_path
+    zsh_path="$(command -v zsh 2>/dev/null)"
+
+    if [[ -z "$zsh_path" ]]; then
+        warn "zsh not found. Skipping default shell change."
+        return
+    fi
+
+    # Check if zsh is already the default
+    if [[ "$SHELL" == "$zsh_path" ]]; then
+        success "zsh is already your default shell"
+        echo ""
+        return
+    fi
+
+    echo -ne "  ${BOLD}Set zsh as your default shell? (y/N):${RESET} "
+    read -r answer
+
+    if [[ "$answer" =~ ^[yY]$ ]]; then
+        # Ensure zsh is in /etc/shells
+        if ! grep -qx "$zsh_path" /etc/shells 2>/dev/null; then
+            echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null
+        fi
+
+        if chsh -s "$zsh_path" 2>/dev/null; then
+            success "Default shell changed to zsh"
+        else
+            # Try with sudo if regular chsh fails
+            if sudo chsh -s "$zsh_path" "$(whoami)" 2>/dev/null; then
+                success "Default shell changed to zsh"
+            else
+                warn "Could not change default shell. Run manually: chsh -s ${zsh_path}"
+            fi
+        fi
+    else
+        info "Skipped. You can change it later with: chsh -s ${zsh_path}"
+    fi
+
     echo ""
 }
 
@@ -286,14 +508,23 @@ print_done() {
     echo -e "${RESET}"
     echo -e "  To apply the new config, either:"
     echo -e "    ${CYAN}1.${RESET} Restart your terminal"
-    echo -e "    ${CYAN}2.${RESET} Run: ${WHITE}source ~/.zshrc${RESET}"
+    echo -e "    ${CYAN}2.${RESET} Run: ${WHITE}exec zsh${RESET}"
     echo ""
     echo -e "  ${DIM}Your old configs are safe in:${RESET}"
     echo -e "  ${CYAN}${BACKUP_DIR}/${RESET}"
     echo ""
-    echo -e "  ${DIM}Wallpapers were saved to:${RESET}"
-    echo -e "  ${CYAN}${PICTURES_DIR}/${RESET}"
-    echo ""
+
+    if [[ -d "$PICTURES_DIR" ]]; then
+        local has_wp=false
+        [[ -f "$PICTURES_DIR/night_temple_samurai.jpg" ]] && has_wp=true
+        [[ -f "$PICTURES_DIR/twilight_landscape.jpg" ]] && has_wp=true
+        if [[ "$has_wp" == true ]]; then
+            echo -e "  ${DIM}Wallpapers saved to:${RESET}"
+            echo -e "  ${CYAN}${PICTURES_DIR}/${RESET}"
+            echo ""
+        fi
+    fi
+
     echo -e "  ${MAGENTA}${BOLD}Enjoy the shell, traveler.${RESET}"
     echo ""
 }
@@ -303,13 +534,14 @@ print_done() {
 # ============================================================
 main() {
     print_banner
-    check_prerequisites
+    elevate_privileges
+    verify_bundled_files
+    install_dependencies
     ask_consent
     backup_existing
-    clone_repo
     install_configs
     install_wallpapers
-    cleanup
+    set_default_shell
     print_done
 }
 

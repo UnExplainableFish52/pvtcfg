@@ -103,29 +103,12 @@ print_banner() {
 }
 
 # ---------------------------
-# Elevate privileges
+# Refuse to run as root
 # ---------------------------
-elevate_privileges() {
-    if [[ "$EUID" -ne 0 ]]; then
-        info "This installer needs elevated privileges to install packages."
-        echo -e "  ${DIM}You will be prompted for your sudo password.${RESET}"
-        echo ""
-
-        if ! sudo -v 2>/dev/null; then
-            fail "Failed to obtain sudo privileges. Please run with: sudo ./install.sh"
-        fi
-
-        success "Sudo privileges acquired"
-
-        # Keep sudo alive in the background for the duration of the script
-        while true; do sudo -n true; sleep 50; kill -0 "$$" || exit; done 2>/dev/null &
-        SUDO_KEEPALIVE_PID=$!
-        trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null' EXIT
-    else
-        success "Running as root"
+refuse_root() {
+    if [[ "$EUID" -eq 0 ]]; then
+        fail "Do NOT run this script as root or with sudo.\n  Run it as your normal user: ${WHITE}./install.sh${RESET}\n  The script will ask for sudo only when installing packages."
     fi
-
-    echo ""
 }
 
 # ---------------------------
@@ -469,27 +452,18 @@ set_default_shell() {
         return
     fi
 
-    echo -ne "  ${BOLD}Set zsh as your default shell? (y/N):${RESET} "
-    read -r answer
+    info "Changing your default shell to zsh..."
+    echo -e "  ${DIM}You may be prompted for your password.${RESET}"
 
-    if [[ "$answer" =~ ^[yY]$ ]]; then
-        # Ensure zsh is in /etc/shells
-        if ! grep -qx "$zsh_path" /etc/shells 2>/dev/null; then
-            echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null
-        fi
+    # Ensure zsh is listed in /etc/shells
+    if ! grep -qx "$zsh_path" /etc/shells 2>/dev/null; then
+        echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null
+    fi
 
-        if chsh -s "$zsh_path" 2>/dev/null; then
-            success "Default shell changed to zsh"
-        else
-            # Try with sudo if regular chsh fails
-            if sudo chsh -s "$zsh_path" "$(whoami)" 2>/dev/null; then
-                success "Default shell changed to zsh"
-            else
-                warn "Could not change default shell. Run manually: chsh -s ${zsh_path}"
-            fi
-        fi
+    if chsh -s "$zsh_path"; then
+        success "Default shell changed to zsh"
     else
-        info "Skipped. You can change it later with: chsh -s ${zsh_path}"
+        warn "Could not change default shell. Run manually: chsh -s ${zsh_path}"
     fi
 
     echo ""
@@ -534,7 +508,7 @@ print_done() {
 # ============================================================
 main() {
     print_banner
-    elevate_privileges
+    refuse_root
     verify_bundled_files
     install_dependencies
     ask_consent

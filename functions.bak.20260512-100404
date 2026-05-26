@@ -191,7 +191,7 @@ tp() {
   print -P "%F{cyan}%Btp menu:%b%f"
   print "  c  -> ${codes}"
   print "  p  -> ${codes}"
-  print "  t  -> ${temp} (asks to empty first)"
+  print "  t  -> ${temp}"
   print "  i  -> $HOME/.zsh_config"
   print "  d  -> $HOME/Downloads"
   print "  n  -> ${docs}/notes"
@@ -252,3 +252,8 @@ rand() {
 
 random() { rand "$@"; }
 rint()   { rand "$@"; }
+
+# python vevn configs 
+mkvenv(){
+python3 -m venv "$1" && cd "$1" && source bin/activate
+}

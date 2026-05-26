@@ -5,6 +5,10 @@
 # emacs mode keybindings
 bindkey -e
 
+bindkey "^[[3;5~" kill-word
+bindkey "^[[1;5D" backward-word
+bindkey "^[[1;5C" forward-word
+
 # Up/Down: search history by current prefix (nice for repeating similar commands)
 autoload -Uz up-line-or-beginning-search down-line-or-beginning-search
 zle -N up-line-or-beginning-search

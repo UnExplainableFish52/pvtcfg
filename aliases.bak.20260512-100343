@@ -3,12 +3,18 @@
 # -------------------------
 # Navigation
 # -------------------------
+alias install='sudo apt update && sudo apt install'
 alias ..='cd ..'
 alias ...='cd ../..'
 alias c='clear'
+alias cdpg='cd "$HOME/Documents/playground/"'
+alias cdtemp='cd "$HOME/Documents/playground/temp/"'
 alias doc='cd "$HOME/Documents/"'
 alias cdsh='cd "$HOME/Documents/bash/shell"'
+alias cdshc='cd "$HOME/.zsh_config/"'
 alias cdshcfg='cd "$HOME/.zsh_config/"'
+alias ping='ping -c 4'
+
 #does not work because it requires dir, but will work with functions
 # alias cdfunc='cd "$HOME/.zsh_config/functions.zsh"'
 
@@ -109,3 +115,6 @@ alias gaddconf='git add $(git diff --name-only --diff-filter=U 2>/dev/null)'
 
 # “Neglecting merges” / ignore merge commits in log
 alias glnm='git log --no-merges --oneline --decorate'
+
+# Python
+alias py3='python3'

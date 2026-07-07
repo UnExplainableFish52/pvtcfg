@@ -18,6 +18,11 @@ _tp_docs_dir() {
   print -r -- "$docs"
 }
 
+# function to check for recent files modified with sorting, filepath and info
+function check_recent_files() {
+    find "$@" -type f -printf '%T@ %T+ %p\n' | sort -nr | cut -d' ' -f2-
+}
+
 _tp_mkdir() { command mkdir -p -- "$1" 2>/dev/null; }
 
 # Empty directory contents (includes nested dirs). Keeps the directory itself.

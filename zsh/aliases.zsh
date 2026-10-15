@@ -13,16 +13,18 @@ alias doc='cd "$HOME/Documents/"'
 alias cdsh='cd "$HOME/Documents/bash/shell"'
 alias cdshc='cd "$HOME/.zsh_config/"'
 alias cdshcfg='cd "$HOME/.zsh_config/"'
+# Named directory: cd shell_config (or cd ~shell_config to avoid name collisions).
+# The main .zshrc creates this directory before loading the modules.
+hash -d shell_config="${ZSHCFG_DIR:-$HOME/.zsh_config}"
+alias shell_config='builtin cd -- ~shell_config'
 alias ping='ping -c 4'
 
 #does not work because it requires dir, but will work with functions
 # alias cdfunc='cd "$HOME/.zsh_config/functions.zsh"'
 
 
-# Configure to use neovim
-alias vi='nvim'
-alias vim='nvim'
-alias neovim='nvim'
+# Editor defaults are configured in env.zsh; vi/vim keep their normal meanings.
+alias chkv='zshcfg check'
 
 # -------------------------
 # Safer defaults
@@ -47,7 +49,10 @@ else
 fi
 
 if command -v bat >/dev/null 2>&1; then
-  alias cat='bat'
+  alias cat='bat --style=numbers --paging=never'
+elif command -v batcat >/dev/null 2>&1; then
+  alias bat='batcat'
+  alias cat='batcat --style=numbers --paging=never'
 fi
 
 if command -v rg >/dev/null 2>&1; then

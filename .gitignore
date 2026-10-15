@@ -1,0 +1,7 @@
+# Personal overrides live at ~/.zsh_config/local.zsh, outside the checkout.
+local.zsh
+zsh/local.zsh
+.env
+.env.*
+*.bak.*
+__pycache__/

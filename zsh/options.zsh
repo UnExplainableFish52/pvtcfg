@@ -1,6 +1,9 @@
 # loki options (history)
 
-HISTFILE="$HOME/.zsh_history"
+# Allow named-directory navigation without a tilde: cd shell_config.
+setopt CDABLE_VARS
+
+HISTFILE="${ZSHCFG_HOME:-$HOME}/.zsh_history"
 HISTSIZE=50000
 SAVEHIST=50000
 

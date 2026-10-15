@@ -9,7 +9,8 @@
 # fi
 
 # --- Oh My Zsh base ---
-export ZSH="$HOME/.oh-my-zsh"
+ZSHCFG_HOME="${ZSHCFG_HOME:-$HOME}"
+export ZSH="$ZSHCFG_HOME/.oh-my-zsh"
 
 # Theme (kept exactly as your original)
 ZSH_THEME="powerlevel10k/powerlevel10k"
@@ -18,18 +19,22 @@ ZSH_THEME="powerlevel10k/powerlevel10k"
 plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
 
 # Load Oh My Zsh (kept)
-source "$ZSH/oh-my-zsh.sh"
+if [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
+  source "$ZSH/oh-my-zsh.sh"
+else
+  print -u2 -- 'zshcfg: Oh My Zsh is missing; run install.sh to set up dependencies.'
+fi
 
 # --- Powerlevel10k config (kept) ---
 # To customize prompt: p10k configure OR edit ~/.p10k.zsh
-[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"
+[[ ! -f "$ZSHCFG_HOME/.p10k.zsh" ]] || source "$ZSHCFG_HOME/.p10k.zsh"
 
 # ============================
 # Modular daily config (loki)
 # ============================
 # Folder containing your modules.
 # Modules are safe: they load only if the file exists.
-ZSHCFG_DIR="$HOME/.zsh_config"
+ZSHCFG_DIR="$ZSHCFG_HOME/.zsh_config"
 
 # Ensure the directory exists (prevents errors)
 [[ -d "$ZSHCFG_DIR" ]] || mkdir -p "$ZSHCFG_DIR"

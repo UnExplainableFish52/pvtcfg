@@ -27,10 +27,51 @@ _tp_mkdir() { command mkdir -p -- "$1" 2>/dev/null; }
 
 # Empty directory contents (includes nested dirs). Keeps the directory itself.
 _tp_empty_dir_contents() {
+  emulate -L zsh
   local dir="$1"
-  [[ -d "$dir" ]] || return 1
-  command rm -rf -- "${dir:?}/"* "${dir:?}"/.[!.]* "${dir:?}"/..?* 2>/dev/null
+  [[ -d "$dir" && ! -L "$dir" && "${dir:A}" != / && "${dir:A}" != "${HOME:A}" ]] || return 1
+  local -a entries=( "$dir"/*(DN) )
+  (( ${#entries} )) || return 0
+  command rm -rf -- "${entries[@]}"
 }
+
+# TSH: reset a dedicated scratch workspace and enter it in the CURRENT shell.
+# Every invocation discards the previous contents, including hidden files.
+# This is a working directory, not a child shell or an isolated shell environment.
+TSH() {
+  emulate -L zsh
+  (( $# == 0 )) || { print -u2 -r -- 'Usage: TSH (no arguments)'; return 1; }
+
+  [[ "$HOME" == /* && -d "$HOME" && "${HOME:A}" != / ]] || {
+    print -u2 -r -- 'TSH: HOME must be an existing absolute home directory.'
+    return 1
+  }
+
+  local docs="$HOME/Documents"
+  local base="$docs/shell"
+  local workspace="$base/temp_session"
+  local component
+
+  # Refuse symlinked parents or targets, and files where directories are expected.
+  # A symlink INSIDE the scratch directory is removed without following its target.
+  for component in "$docs" "$base" "$workspace"; do
+    if [[ -L "$component" || ( -e "$component" && ! -d "$component" ) ]]; then
+      print -u2 -r -- "TSH: refusing non-directory or symlink: $component"
+      return 1
+    fi
+  done
+
+  command mkdir -p -- "$workspace" || return 1
+  # Enter before deleting so a failed cd cannot clear an inaccessible workspace.
+  builtin cd -- "$workspace" || return 1
+  _tp_empty_dir_contents "$workspace" || {
+    print -u2 -r -- 'TSH: reset failed; some previous contents may remain.'
+    return 1
+  }
+  print -r -- "TSH: fresh workspace at $workspace"
+}
+
+tsh() { TSH "$@"; }
 
 # Build candidate list: "key<TAB>label<TAB>path"
 _tp_candidates() {
@@ -39,15 +80,16 @@ _tp_candidates() {
   local temp="$codes/temp"
   local notes="$docs/notes"
 
-  print -r -- "c\tcodes\t$codes"
-  print -r -- "p\tcodes\t$codes"
-  print -r -- "t\ttemp\t$temp"
-  print -r -- "i\tzsh_config\t$HOME/.zsh_config"
-  print -r -- "d\tdownloads\t$HOME/Downloads"
-  print -r -- "n\tnotes\t$notes"
-  print -r -- "b\tlocal_bin\t$HOME/.local/bin"
-  print -r -- "s\tssh\t$HOME/.ssh"
-  print -r -- "h\thome\t$HOME"
+  printf '%s\t%s\t%s\n' \
+    c codes "$codes" \
+    p codes "$codes" \
+    t temp "$temp" \
+    i zsh_config "$HOME/.zsh_config" \
+    d downloads "$HOME/Downloads" \
+    n notes "$notes" \
+    b local_bin "$HOME/.local/bin" \
+    s ssh "$HOME/.ssh" \
+    h home "$HOME"
 }
 
 # Non-interactive fuzzy scorer: prefers substring matches; shorter label/path wins.
@@ -60,13 +102,12 @@ _tp_best_match_path() {
   [[ -z "$q" ]] && return 1
   q="${q:l}"  # lowercase
 
-  local line key label path hay score
-  while IFS=$'\t' read -r key label path; do
-    hay="${key} ${label} ${path}"
+  local key label dest hay score pos
+  while IFS=$'\t' read -r key label dest; do
+    hay="${key} ${label} ${dest}"
     hay="${hay:l}"
 
     # If query is substring, score by (position + length); else skip
-    local pos
     pos="$(awk -v a="$hay" -v b="$q" 'BEGIN{print index(a,b)}' 2>/dev/null)"
     [[ -z "$pos" ]] && continue
     (( pos == 0 )) && continue
@@ -75,7 +116,7 @@ _tp_best_match_path() {
     score=$(( pos + ${#hay} ))
     if (( score < bestScore )); then
       bestScore="$score"
-      bestPath="$path"
+      bestPath="$dest"
     fi
   done < <(_tp_candidates)
 
@@ -86,12 +127,12 @@ _tp_best_match_path() {
 _tp_list_matches() {
   local q="$1"
   q="${q:l}"
-  local key label path hay
-  while IFS=$'\t' read -r key label path; do
-    hay="${key} ${label} ${path}"
+  local key label dest hay
+  while IFS=$'\t' read -r key label dest; do
+    hay="${key} ${label} ${dest}"
     hay="${hay:l}"
     if [[ "$hay" == *"$q"* ]]; then
-      print -P "%F{cyan}%B${key}%b%f  %F{yellow}${label}%f  %F{green}${path}%f"
+      print -P "%F{cyan}%B${key}%b%f  %F{yellow}${label}%f  %F{green}${dest}%f"
     fi
   done < <(_tp_candidates)
 }
@@ -105,8 +146,8 @@ tp() {
   _tp_mkdir "$codes"
   _tp_mkdir "$temp"
 
-  local arg1="$1"
-  local arg2="$2"
+  local arg1="${1:-}"
+  local arg2="${2:-}"
 
   # ---- flags ----
   if [[ "$arg1" == "-f" ]]; then
@@ -119,21 +160,21 @@ tp() {
     picked="$(_tp_candidates | fzf --with-nth=1,2,3 --delimiter=$'\t' --prompt='tp> ' --ansi)"
     [[ -z "$picked" ]] && return 0
 
-    local key label path
-    IFS=$'\t' read -r key label path <<< "$picked"
+    local key label dest
+    IFS=$'\t' read -r key label dest <<< "$picked"
 
     # Handle temp empty prompt if selecting temp
     if [[ "$key" == "t" ]]; then
-      print -P "%F{yellow}%BTemp directory:%b%f $path"
+      print -P "%F{yellow}%BTemp directory:%b%f $dest"
       echo -n "Empty temp contents (including subfolders) before cd? (y/N): "
       local ans; read -r ans
       if [[ "$ans" == [yY] ]]; then
-        _tp_empty_dir_contents "$path"
+        _tp_empty_dir_contents "$dest" || return 1
         print -P "%F{green}%BTemp emptied.%b%f"
       fi
     fi
 
-    builtin cd -- "$path"
+    builtin cd -- "$dest"
     return $?
   fi
 
@@ -158,7 +199,7 @@ tp() {
         echo -n "Empty temp contents (including subfolders) before cd? (y/N): "
         local ans; read -r ans
         if [[ "$ans" == [yY] ]]; then
-          _tp_empty_dir_contents "$temp"
+          _tp_empty_dir_contents "$temp" || return 1
           print -P "%F{green}%BTemp emptied.%b%f"
         fi
         builtin cd -- "$temp"
@@ -183,7 +224,7 @@ tp() {
       echo -n "Empty temp contents (including subfolders) before cd? (y/N): "
       local ans; read -r ans
       if [[ "$ans" == [yY] ]]; then
-        _tp_empty_dir_contents "$best"
+        _tp_empty_dir_contents "$best" || return 1
         print -P "%F{green}%BTemp emptied.%b%f"
       fi
     fi

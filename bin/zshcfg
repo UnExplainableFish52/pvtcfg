@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# A small Git wrapper for THIS checkout, independent of the current directory.
+# No automatic merges, rebases, or discarded local edits.
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
+REPO="$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)"
+CONFIG_HOME="${ZSHCFG_HOME:-$HOME}"
+STATE="$CONFIG_HOME/.local/state/zshcfg"
+# Only these paths are automatically staged by publish. local.zsh is excluded.
+MANAGED=(VERSION .zshrc .nanorc .p10k.zsh zsh bin install.sh .gitignore ':(exclude)zsh/local.zsh')
+CONTENT=(.zshrc .nanorc .p10k.zsh zsh bin install.sh .gitignore ':(exclude)zsh/local.zsh')
+
+gitcfg() { git -C "$REPO" "$@"; }
+fail() { printf 'zshcfg: %s\n' "$*" >&2; exit 1; }
+usage() {
+  cat <<'HELP'
+Usage:
+  zshcfg v | V | version     Show version and local edit status
+  zshcfg check | chkv        Compare with remote; offer a pull when behind
+  zshcfg pull                Update a clean checkout, fast-forward only
+  zshcfg push | publish      Commit managed changes and push
+  zshcfg push force          Force-with-lease using the last checked remote
+  zshcfg publish force       Same as push force
+  zshcfg help                Show this help
+
+chkv is also a shell alias for zshcfg check.
+The word force applies only to push/publish. Git's original errors are retained.
+HELP
+}
+
+valid_version() { [[ "$1" =~ ^[0-9]+\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[01]$ ]]; }
+
+# An observed edit changes the DISPLAY version and caches its date outside Git.
+# publish writes that version to VERSION, keeping .1 after the commit is clean.
+# VERSION-only edits are respected, allowing a manual change back to .0.
+current_version() {
+  local recorded fingerprint previous='' cached='' major untracked
+  recorded="$(<"$REPO/VERSION")"
+  valid_version "$recorded" || fail 'VERSION must look like 1.26.10.15.0 or 1.26.10.15.1.'
+  untracked="$(gitcfg ls-files --others --exclude-standard -- "${CONTENT[@]}")"
+  if gitcfg diff --quiet HEAD -- "${CONTENT[@]}" && [[ -z "$untracked" ]]; then
+    printf '%s\n' "$recorded"
+    return
+  fi
+  fingerprint="$(
+    {
+      gitcfg diff --binary HEAD -- "${CONTENT[@]}"
+      while IFS= read -r -d '' name; do
+        printf '%s\0' "$name"
+        gitcfg hash-object -- "$REPO/$name"
+      done < <(gitcfg ls-files -z --others --exclude-standard -- "${CONTENT[@]}")
+    } | gitcfg hash-object --stdin
+  )"
+  if [[ -f "$STATE/dirty-version" ]]; then
+    read -r previous cached < "$STATE/dirty-version" || true
+  fi
+  if [[ "$fingerprint" != "$previous" ]] || ! valid_version "$cached"; then
+    major="${recorded%%.*}"
+    cached="$major.$(date +%y.%m.%d).1"
+    mkdir -p -- "$STATE"
+    printf '%s %s\n' "$fingerprint" "$cached" > "$STATE/dirty-version"
+  fi
+  printf '%s\n' "$cached"
+}
+
+show_version() {
+  local version label='clean'
+  version="$(current_version)"
+  [[ -z "$(gitcfg status --porcelain -- "${MANAGED[@]}")" ]] || label='local edits'
+  printf 'zshcfg %s (%s)\n' "$version" "$label"
+}
+
+upstream() {
+  BRANCH="$(gitcfg symbolic-ref --quiet --short HEAD)" || fail 'Detached HEAD: switch to a branch first.'
+  REMOTE="$(gitcfg config --get "branch.$BRANCH.remote")" || fail "No upstream for $BRANCH. Set one with git push -u origin $BRANCH."
+  REMOTE_REF="$(gitcfg config --get "branch.$BRANCH.merge")" || fail 'The upstream branch is not configured.'
+  [[ "$REMOTE" != . && "$REMOTE_REF" == refs/heads/* ]] || fail 'An external upstream branch is required.'
+}
+
+fetch_remote() {
+  upstream
+  if gitcfg fetch "$REMOTE" "$REMOTE_REF"; then
+    REMOTE_HEAD="$(gitcfg rev-parse FETCH_HEAD)"
+    # Save the exact observed SHA. A later force push uses an explicit lease.
+    mkdir -p -- "$STATE"
+    printf '%s %s %s\n' "$REMOTE" "$REMOTE_REF" "$REMOTE_HEAD" > "$STATE/checked-remote"
+  else
+    local result=$?
+    printf 'zshcfg: Could not check the remote; remote status is unknown. See Git error above.\n' >&2
+    return "$result"
+  fi
+  read -r AHEAD BEHIND < <(gitcfg rev-list --left-right --count "HEAD...$REMOTE_HEAD")
+}
+
+check_remote() {
+  local remote_version answer='n'
+  show_version
+  fetch_remote || return $?
+  remote_version="$(gitcfg show "$REMOTE_HEAD:VERSION" 2>/dev/null || printf 'unversioned')"
+  printf 'Remote version: %s\nLocal ahead: %s commit(s); remote ahead: %s commit(s).\n' "$remote_version" "$AHEAD" "$BEHIND"
+  if (( AHEAD == 0 && BEHIND == 0 )); then
+    printf 'Same committed history.\n'
+  elif (( AHEAD > 0 && BEHIND > 0 )); then
+    printf 'Histories have diverged. Use ordinary Git to combine them; nothing was merged.\n'
+  elif (( BEHIND > 0 )); then
+    if [[ -n "$(gitcfg status --porcelain)" ]]; then
+      printf 'Remote updates are available, but local edits must be saved before pulling.\n'
+    else
+      read -r -p 'Pull the remote update? [y/N] ' answer || true
+      [[ "$answer" != [yY] ]] || pull_config
+    fi
+  else
+    printf 'Local commits are ready to publish.\n'
+  fi
+}
+
+pull_config() {
+  [[ -z "$(gitcfg status --porcelain)" ]] || fail 'Local edits exist. Commit or stash them with Git before pulling; nothing was changed.'
+  fetch_remote || return $?
+  if (( AHEAD > 0 && BEHIND > 0 )); then
+    fail 'Histories have diverged. Combine them with ordinary Git; pull will not merge or rebase.'
+  fi
+  if (( BEHIND == 0 )); then
+    printf 'No remote updates to pull.\n'
+    return
+  fi
+  gitcfg merge --ff-only "$REMOTE_HEAD"
+  printf 'Updated. Open a new terminal or run exec zsh to load the changes.\n'
+}
+
+validate_config() {
+  bash -n "$REPO/install.sh" || return $?
+  bash -n "$REPO/bin/zshcfg" || return $?
+  zsh -n "$REPO/.zshrc" || return $?
+  local file
+  for file in "$REPO/.p10k.zsh" "$REPO"/zsh/*.zsh; do
+    zsh -n "$file" || return $?
+  done
+}
+
+publish_config() {
+  local mode="${1:-}" file version expected_remote='' expected_ref='' expected_sha='' stamp result
+  upstream
+  # Do not accidentally commit somebody's unrelated staged README/image/etc.
+  while IFS= read -r -d '' file; do
+    case "$file" in
+      VERSION|.zshrc|.nanorc|.p10k.zsh|zsh/*|bin/*|install.sh|.gitignore) ;;
+      *) fail "Unrelated staged file: $file. Unstage it before publishing configs." ;;
+    esac
+    case "$file" in local.zsh|zsh/local.zsh) fail 'Private local overrides must not be staged.' ;; esac
+  done < <(gitcfg diff --cached --name-only -z)
+  validate_config || fail 'Shell syntax check failed. No commit or push was made.'
+  version="$(current_version)"
+  printf '%s\n' "$version" > "$REPO/VERSION"
+  gitcfg add -A -- "${MANAGED[@]}"
+  if ! gitcfg diff --cached --quiet; then
+    gitcfg commit -m "Update Zsh configuration $version ($(date +%Y-%m-%d_%H-%M-%S))"
+  fi
+  if [[ "$mode" == force ]]; then
+    [[ -f "$STATE/checked-remote" ]] || fail 'Run zshcfg check first to inspect the remote before a forced push. Your local commit is saved.'
+    read -r expected_remote expected_ref expected_sha < "$STATE/checked-remote"
+    [[ "$expected_remote" == "$REMOTE" && "$expected_ref" == "$REMOTE_REF" && "$expected_sha" =~ ^[0-9a-f]{40,64}$ ]] || fail 'The upstream changed. Run zshcfg check again before forcing.'
+    stamp="$(date +%Y%m%d-%H%M%S)-$$"
+    gitcfg branch "zshcfg-backup/local-$stamp" HEAD
+    gitcfg branch "zshcfg-backup/remote-$stamp" "$expected_sha"
+    printf 'Force requested: replacing remote history if its head is still %s.\nLocal and checked remote histories have backup branches.\n' "$expected_sha"
+    if gitcfg push "--force-with-lease=$REMOTE_REF:$expected_sha" "$REMOTE" "HEAD:$REMOTE_REF"; then
+      printf 'Published %s.\n' "$version"
+    else
+      result=$?
+      printf 'zshcfg: Forced push failed. Your local commit and backup branches remain. See Git error above.\n' >&2
+      return "$result"
+    fi
+  else
+    if gitcfg push "$REMOTE" "HEAD:$REMOTE_REF"; then
+      printf 'Published %s.\n' "$version"
+    else
+      result=$?
+      printf 'zshcfg: Push failed; your local commit is saved. Git above reports whether authentication, network access, or remote history blocked it.\n' >&2
+      return "$result"
+    fi
+  fi
+}
+
+[[ "$(gitcfg rev-parse --show-toplevel)" == "$REPO" ]] || fail 'This script must live in its Zsh configuration Git checkout.'
+action="${1:-help}"
+case "$action" in
+  v|V|version)
+    (( $# == 1 )) || fail 'Usage: zshcfg version'
+    show_version ;;
+  chkv|check)
+    (( $# == 1 )) || fail 'Usage: zshcfg check'
+    check_remote ;;
+  pull)
+    (( $# == 1 )) || fail 'Usage: zshcfg pull (force is not supported)'
+    pull_config ;;
+  push|publish)
+    (( $# == 1 )) || { (( $# == 2 )) && [[ "$2" == force ]]; } || fail 'Usage: zshcfg push [force]'
+    publish_config "${2:-}" ;;
+  help)
+    (( $# <= 1 )) || fail 'Usage: zshcfg help'
+    usage ;;
+  *) usage >&2; exit 2 ;;
+esac

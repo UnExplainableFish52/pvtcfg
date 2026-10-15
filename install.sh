@@ -1,522 +1,232 @@
 #!/usr/bin/env bash
-# ============================================================
-#  Loki Shell Config Installer
-#  Applies Loki's ZSH configuration from bundled files.
-#  https://github.com/UnExplainableFish52/pvtcfg
-#
-#  USAGE:
-#    chmod +x install.sh && ./install.sh
-#
-#  The installer expects the following files to be present
-#  in the SAME directory as this script:
-#    .p10k.zsh
-#    .zshrc.bak.*
-#    aliases.bak.*
-#    env.bak.*
-#    functions.bak.*
-#    keybinds.bak.*
-#    local.bak.*
-#    options.bak.*
-#    night_temple_samurai.jpg   (optional wallpaper)
-#    secondwallpp.jpg           (optional wallpaper)
-# ============================================================
-
+# Install a permanent, Git-tracked Zsh configuration. Run as your normal user.
+# Download this file alone, or run it from a clone. The working directory is irrelevant.
 set -euo pipefail
 
-# ---------------------------
-# Colors & formatting
-# ---------------------------
-BOLD='\033[1m'
-DIM='\033[2m'
-RESET='\033[0m'
-RED='\033[1;31m'
-GREEN='\033[1;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[1;36m'
-MAGENTA='\033[1;35m'
-WHITE='\033[1;37m'
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+CONFIG_HOME="${ZSHCFG_HOME:-$HOME}"
+[[ "$CONFIG_HOME" == /* && "$CONFIG_HOME" != / ]] || { printf 'An absolute, non-root home path is required.\n' >&2; exit 1; }
+REPO="$CONFIG_HOME/.local/share/zshcfg/repo"
+REMOTE="${ZSHCFG_REMOTE:-https://github.com/UnExplainableFish52/pvtcfg.git}"
+BRANCH="${ZSHCFG_BRANCH:-main}"
+ASSUME_YES=false
+SKIP_DEPS=false
+NO_CHSH=false
+STAMP="$(date +%Y-%m-%d_%H-%M-%S)-$$"
+declare -a INSTALLED=() BACKUPS=()
+ACTIVATING=false
 
-# ---------------------------
-# Resolve script directory
-# ---------------------------
-# All bundled config files live next to this script.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# ---------------------------
-# Config
-# ---------------------------
-BACKUP_DIR="$HOME/.config/loki-shell-backup"
-ZSH_CONFIG_DIR="$HOME/.zsh_config"
-PICTURES_DIR="$HOME/Pictures"
-
-# ---------------------------
-# Helpers
-# ---------------------------
-info()    { echo -e "${CYAN}[*]${RESET} $1"; }
-success() { echo -e "${GREEN}[✓]${RESET} $1"; }
-warn()    { echo -e "${YELLOW}[!]${RESET} $1"; }
-fail()    { echo -e "${RED}[✗]${RESET} $1"; exit 1; }
-
-# Resolve a single file from a glob pattern in SCRIPT_DIR.
-# Returns the first match or empty string.
-resolve_file() {
-    local pattern="$1"
-    local match
-    match=$(find "$SCRIPT_DIR" -maxdepth 1 -name "$pattern" -print -quit 2>/dev/null)
-    echo "$match"
+info() { printf 'zshcfg: %s\n' "$*"; }
+fail() { printf 'zshcfg: %s\n' "$*" >&2; exit 1; }
+confirm() {
+  local answer='n'
+  read -r -p "$1 [y/N] " answer || true
+  [[ "$answer" == [yY] ]]
+}
+as_admin() {
+  if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
 }
 
-# Copy a bundled file to a destination.
-# Usage: install_file <glob_pattern> <destination_path> <label>
-install_file() {
-    local pattern="$1"
-    local dest="$2"
-    local label="$3"
+for option in "$@"; do
+  case "$option" in
+    --yes) ASSUME_YES=true ;;
+    --skip-deps) SKIP_DEPS=true ;;
+    --no-chsh) NO_CHSH=true ;;
+    --help)
+      printf 'Usage: bash install.sh [--yes] [--skip-deps] [--no-chsh]\n'
+      printf 'ZSHCFG_HOME selects an alternate home directory for isolated testing.\n'
+      printf 'ZSHCFG_REMOTE / ZSHCFG_BRANCH select a fork or branch for standalone bootstrap.\n'
+      exit 0 ;;
+    *) fail "Unknown option: $option" ;;
+  esac
+done
 
-    local src
-    src="$(resolve_file "$pattern")"
-
-    if [[ -z "$src" ]]; then
-        warn "Source not found for pattern: ${pattern} -- skipping ${label}"
-        return 1
-    fi
-
-    cp -f "$src" "$dest"
-    success "${label}  -->  ${dest}"
-}
-
-# ---------------------------
-# Banner
-# ---------------------------
-print_banner() {
-    echo ""
-    echo -e "${MAGENTA}${BOLD}"
-    echo "  ╔═══════════════════════════════════════════════╗"
-    echo "  ║                                               ║"
-    echo "  ║        Loki  Shell  Config  Installer         ║"
-    echo "  ║                                               ║"
-    echo "  ╚═══════════════════════════════════════════════╝"
-    echo -e "${RESET}"
-    echo -e "  ${DIM}ZSH configuration by Loki${RESET}"
-    echo -e "  ${DIM}https://github.com/UnExplainableFish52/pvtcfg${RESET}"
-    echo ""
-}
-
-# ---------------------------
-# Refuse to run as root
-# ---------------------------
-refuse_root() {
-    if [[ "$EUID" -eq 0 ]]; then
-        fail "Do NOT run this script as root or with sudo.\n  Run it as your normal user: ${WHITE}./install.sh${RESET}\n  The script will ask for sudo only when installing packages."
-    fi
-}
-
-# ---------------------------
-# Detect package manager
-# ---------------------------
-detect_pkg_manager() {
-    if command -v apt-get &>/dev/null; then
-        PKG_MANAGER="apt"
-    elif command -v dnf &>/dev/null; then
-        PKG_MANAGER="dnf"
-    elif command -v pacman &>/dev/null; then
-        PKG_MANAGER="pacman"
-    elif command -v zypper &>/dev/null; then
-        PKG_MANAGER="zypper"
-    elif command -v apk &>/dev/null; then
-        PKG_MANAGER="apk"
-    else
-        PKG_MANAGER="unknown"
-    fi
-}
-
-# ---------------------------
-# Install dependencies
-# ---------------------------
-install_dependencies() {
-    info "Checking and installing dependencies..."
-    echo ""
-
-    detect_pkg_manager
-
-    local packages_to_install=()
-
-    # Check for zsh
-    if ! command -v zsh &>/dev/null; then
-        packages_to_install+=("zsh")
-    else
-        success "zsh is already installed"
-    fi
-
-    # Check for git
-    if ! command -v git &>/dev/null; then
-        packages_to_install+=("git")
-    else
-        success "git is already installed"
-    fi
-
-    # Check for curl
-    if ! command -v curl &>/dev/null; then
-        packages_to_install+=("curl")
-    else
-        success "curl is already installed"
-    fi
-
-    # Install missing packages
-    if [[ ${#packages_to_install[@]} -gt 0 ]]; then
-        info "Installing: ${packages_to_install[*]}"
-
-        case "$PKG_MANAGER" in
-            apt)
-                sudo apt-get update -qq
-                sudo apt-get install -y -qq "${packages_to_install[@]}"
-                ;;
-            dnf)
-                sudo dnf install -y -q "${packages_to_install[@]}"
-                ;;
-            pacman)
-                sudo pacman -Sy --noconfirm --needed "${packages_to_install[@]}"
-                ;;
-            zypper)
-                sudo zypper install -y -n "${packages_to_install[@]}"
-                ;;
-            apk)
-                sudo apk add --no-cache "${packages_to_install[@]}"
-                ;;
-            *)
-                warn "Unknown package manager. Please install manually: ${packages_to_install[*]}"
-                ;;
-        esac
-
-        # Verify installation
-        for pkg in "${packages_to_install[@]}"; do
-            if command -v "$pkg" &>/dev/null; then
-                success "${pkg} installed successfully"
-            else
-                warn "${pkg} may not have installed correctly"
-            fi
-        done
-    fi
-
-    echo ""
-
-    # Install Oh My Zsh if not present
-    if [[ ! -d "$HOME/.oh-my-zsh" ]]; then
-        info "Installing Oh My Zsh..."
-        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-        success "Oh My Zsh installed"
-    else
-        success "Oh My Zsh is already installed"
-    fi
-
-    # Install Powerlevel10k theme if not present
-    local p10k_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
-    if [[ ! -d "$p10k_dir" ]]; then
-        info "Installing Powerlevel10k theme..."
-        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git "$p10k_dir" 2>&1 | while read -r line; do
-            echo -e "  ${DIM}${line}${RESET}"
-        done
-        success "Powerlevel10k installed"
-    else
-        success "Powerlevel10k is already installed"
-    fi
-
-    # Install zsh-autosuggestions if not present
-    local autosug_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
-    if [[ ! -d "$autosug_dir" ]]; then
-        info "Installing zsh-autosuggestions plugin..."
-        git clone --depth=1 https://github.com/zsh-users/zsh-autosuggestions.git "$autosug_dir" 2>&1 | while read -r line; do
-            echo -e "  ${DIM}${line}${RESET}"
-        done
-        success "zsh-autosuggestions installed"
-    else
-        success "zsh-autosuggestions is already installed"
-    fi
-
-    # Install zsh-syntax-highlighting if not present
-    local synhl_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting"
-    if [[ ! -d "$synhl_dir" ]]; then
-        info "Installing zsh-syntax-highlighting plugin..."
-        git clone --depth=1 https://github.com/zsh-users/zsh-syntax-highlighting.git "$synhl_dir" 2>&1 | while read -r line; do
-            echo -e "  ${DIM}${line}${RESET}"
-        done
-        success "zsh-syntax-highlighting installed"
-    else
-        success "zsh-syntax-highlighting is already installed"
-    fi
-
-    echo ""
-}
-
-# ---------------------------
-# Verify bundled files exist
-# ---------------------------
-verify_bundled_files() {
-    info "Verifying bundled config files in: ${SCRIPT_DIR}/"
-    echo ""
-
-    local missing=0
-
-    # Check for the essential files
-    local required_patterns=(
-        ".zshrc.bak.*"
-        ".p10k.zsh"
-        "aliases.bak.*"
-        "env.bak.*"
-        "functions.bak.*"
-        "keybinds.bak.*"
-        "local.bak.*"
-        "options.bak.*"
-    )
-
-    for pattern in "${required_patterns[@]}"; do
-        local found
-        found="$(resolve_file "$pattern")"
-        if [[ -n "$found" ]]; then
-            success "Found: $(basename "$found")"
-        else
-            warn "Missing: ${pattern}"
-            ((missing++))
-        fi
+# Config activation is reversible. Dependencies and the checkout are kept on failure.
+rollback() {
+  local result=$? i
+  if [[ "$ACTIVATING" == true ]]; then
+    printf 'zshcfg: Activation failed; restoring replaced configuration files.\n' >&2
+    set +e
+    for (( i=${#INSTALLED[@]}-1; i>=0; i-- )); do
+      rm -f -- "${INSTALLED[i]}"
+      if [[ -n "${BACKUPS[i]}" ]]; then mv -- "${BACKUPS[i]}" "${INSTALLED[i]}"; fi
     done
+  fi
+  exit "$result"
+}
+trap rollback EXIT
 
-    echo ""
+install_packages() {
+  local tool manager package
+  local -a wanted=() packages=()
+  local -a tools=(zsh git curl nano fzf rg bat eza python3)
+  for tool in "${tools[@]}"; do
+    if [[ "$tool" == bat ]] && command -v batcat >/dev/null 2>&1; then continue; fi
+    command -v "$tool" >/dev/null 2>&1 || wanted+=("$tool")
+  done
+  if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
+    wanted+=(venv)
+  fi
+  (( ${#wanted[@]} )) || return 0
 
-    if [[ $missing -gt 0 ]]; then
-        fail "Missing ${missing} required config file(s). Ensure all files are in: ${SCRIPT_DIR}/"
-    fi
-
-    success "All required config files are present"
-    echo ""
+  for manager in apt-get dnf pacman zypper apk; do
+    command -v "$manager" >/dev/null 2>&1 && break
+  done
+  command -v "$manager" >/dev/null 2>&1 || fail "Install these missing tools manually, then rerun: ${wanted[*]}"
+  for tool in "${wanted[@]}"; do
+    package="$tool"
+    case "$tool" in
+      rg) package=ripgrep ;;
+      python3) [[ "$manager" != pacman ]] || package=python ;;
+      venv)
+        case "$manager" in
+          apt-get) package=python3-venv ;;
+          pacman) package=python ;;
+          *) package=python3 ;;
+        esac ;;
+    esac
+    [[ " ${packages[*]} " == *" $package "* ]] || packages+=("$package")
+  done
+  info "Installing missing packages using $manager: ${packages[*]}"
+  case "$manager" in
+    apt-get) as_admin apt-get update; as_admin apt-get install -y "${packages[@]}" ;;
+    dnf) as_admin dnf install -y "${packages[@]}" ;;
+    pacman) as_admin pacman -S --needed --noconfirm "${packages[@]}" ;;
+    zypper) as_admin zypper --non-interactive install "${packages[@]}" ;;
+    apk) as_admin apk add "${packages[@]}" ;;
+  esac
+  for tool in "${tools[@]}"; do
+    if [[ "$tool" == bat ]] && command -v batcat >/dev/null 2>&1; then continue; fi
+    command -v "$tool" >/dev/null 2>&1 || fail "Missing after installation: $tool. Configuration has not been replaced."
+  done
+  python3 -c 'import venv, ensurepip' || fail 'Python venv support is missing.'
 }
 
-# ---------------------------
-# Consent prompt
-# ---------------------------
-ask_consent() {
-    echo -e "${YELLOW}${BOLD}  ⚠  WARNING${RESET}"
-    echo ""
-    echo -e "  This script will ${RED}${BOLD}OVERWRITE${RESET} your current shell configuration:"
-    echo ""
-    echo -e "    ${WHITE}~/.zshrc${RESET}"
-    echo -e "    ${WHITE}~/.p10k.zsh${RESET}"
-    echo -e "    ${WHITE}~/.zsh_config/aliases.zsh${RESET}"
-    echo -e "    ${WHITE}~/.zsh_config/env.zsh${RESET}"
-    echo -e "    ${WHITE}~/.zsh_config/functions.zsh${RESET}"
-    echo -e "    ${WHITE}~/.zsh_config/keybinds.zsh${RESET}"
-    echo -e "    ${WHITE}~/.zsh_config/local.zsh${RESET}"
-    echo -e "    ${WHITE}~/.zsh_config/options.zsh${RESET}"
-    echo ""
-    echo -e "  Your existing configs will be safely backed up to:"
-    echo -e "    ${CYAN}${BACKUP_DIR}/<timestamp>/${RESET}"
-    echo ""
-    echo -e "  ${DIM}Make sure you understand what you are doing.${RESET}"
-    echo ""
-
-    echo -ne "  ${BOLD}Do you want to proceed? (y/N):${RESET} "
-    read -r answer
-
-    if [[ ! "$answer" =~ ^[yY]$ ]]; then
-        echo ""
-        info "Installation cancelled. Nothing was changed."
-        echo -e "  ${DIM}See you next time!${RESET}"
-        echo ""
-        exit 0
-    fi
-
-    echo ""
+clone_dependency() {
+  local url="$1" destination="$2" expected="$3"
+  if [[ ! -e "$destination" ]]; then
+    mkdir -p -- "$(dirname -- "$destination")"
+    git clone --depth=1 "$url" "$destination"
+  fi
+  [[ -f "$destination/$expected" ]] || fail "Incomplete dependency: $destination (expected $expected)."
 }
 
-# ---------------------------
-# Backup existing configs
-# ---------------------------
-backup_existing() {
-    local timestamp
-    timestamp="$(date +%Y%m%d-%H%M%S)"
-    local backup_dest="${BACKUP_DIR}/${timestamp}"
+install_dependencies() {
+  install_packages
+  # Clone directly: the Oh My Zsh installer must not overwrite .zshrc first.
+  clone_dependency https://github.com/ohmyzsh/ohmyzsh.git "$CONFIG_HOME/.oh-my-zsh" oh-my-zsh.sh
+  clone_dependency https://github.com/romkatv/powerlevel10k.git "$CONFIG_HOME/.oh-my-zsh/custom/themes/powerlevel10k" powerlevel10k.zsh-theme
+  clone_dependency https://github.com/zsh-users/zsh-autosuggestions.git "$CONFIG_HOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" zsh-autosuggestions.plugin.zsh
+  clone_dependency https://github.com/zsh-users/zsh-syntax-highlighting.git "$CONFIG_HOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" zsh-syntax-highlighting.plugin.zsh
+}
 
-    info "Backing up existing configs to: ${backup_dest}/"
+prepare_repo() {
+  mkdir -p -- "$(dirname -- "$REPO")"
+  [[ ! -L "$REPO" ]] || fail "The permanent checkout cannot be a symlink: $REPO"
+  if [[ -e "$REPO" ]]; then
+    [[ -d "$REPO/.git" ]] || fail "Existing path is not a normal Git checkout: $REPO"
+    info 'Keeping the existing permanent checkout. Use zshcfg pull for updates.'
+  elif [[ -f "$SCRIPT_DIR/.zshrc" && -f "$SCRIPT_DIR/bin/zshcfg" && -d "$SCRIPT_DIR/.git" ]]; then
+    [[ -z "$(git -C "$SCRIPT_DIR" status --porcelain)" ]] || fail 'Commit your checkout changes before installing so the permanent clone includes them.'
+    git clone --no-hardlinks "$SCRIPT_DIR" "$REPO"
+    # A local clone should continue syncing with the original online remote.
+    local source_remote source_branch
+    source_remote="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || printf '%s' "$REMOTE")"
+    git -C "$REPO" remote set-url origin "$source_remote"
+    source_branch="$(git -C "$REPO" symbolic-ref --short HEAD)"
+    git -C "$REPO" config "branch.$source_branch.remote" origin
+    git -C "$REPO" config "branch.$source_branch.merge" "refs/heads/$source_branch"
+  else
+    git clone --branch "$BRANCH" "$REMOTE" "$REPO"
+  fi
+  [[ -f "$REPO/bin/zshcfg" && -f "$REPO/.zshrc" && -f "$REPO/VERSION" && -d "$REPO/zsh" ]] || fail 'The selected remote does not contain the new zshcfg layout. Select the implementation branch until it is merged.'
+  bash -n "$REPO/install.sh"
+  bash -n "$REPO/bin/zshcfg"
+  local file
+  for file in "$REPO/.zshrc" "$REPO/.p10k.zsh" "$REPO"/zsh/*.zsh; do zsh -n "$file"; done
+  [[ -f "$REPO/.nanorc" ]] || fail 'The checkout is missing .nanorc.'
+}
 
-    mkdir -p "$backup_dest"
-
-    local backed_up=0
-
-    # Back up ~/.zshrc
-    if [[ -f "$HOME/.zshrc" ]]; then
-        cp "$HOME/.zshrc" "$backup_dest/zshrc"
-        success "~/.zshrc"
-        ((backed_up++)) || true
-    fi
-
-    # Back up ~/.p10k.zsh
-    if [[ -f "$HOME/.p10k.zsh" ]]; then
-        cp "$HOME/.p10k.zsh" "$backup_dest/p10k.zsh"
-        success "~/.p10k.zsh"
-        ((backed_up++)) || true
-    fi
-
-    # Back up all files in ~/.zsh_config/
-    if [[ -d "$ZSH_CONFIG_DIR" ]]; then
-        mkdir -p "$backup_dest/zsh_config"
-        local f
-        for f in "$ZSH_CONFIG_DIR"/*.zsh; do
-            if [[ -f "$f" ]]; then
-                cp "$f" "$backup_dest/zsh_config/"
-                success "$f"
-                ((backed_up++)) || true
-            fi
-        done
-    fi
-
-    if [[ $backed_up -eq 0 ]]; then
-        warn "No existing config files found to back up (fresh install)."
+link_file() {
+  local source="$1" destination="$2" backup=''
+  if [[ -L "$destination" && "$(readlink -f -- "$destination")" == "$source" ]]; then
+    info "Already linked: $destination"
+    return
+  fi
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    backup="$destination.bak.$STAMP"
+    [[ ! -e "$backup" && ! -L "$backup" ]] || fail "Backup already exists: $backup"
+    if [[ -L "$destination" && -f "$destination" ]]; then
+      # Freeze old linked contents; later Git updates must not alter the backup.
+      cp -pL -- "$destination" "$backup"
+      rm -- "$destination"
     else
-        success "Backed up ${backed_up} file(s) securely"
+      mv -- "$destination" "$backup"
     fi
-
-    echo ""
+    info "Backup: $backup"
+  fi
+  INSTALLED+=("$destination")
+  BACKUPS+=("$backup")
+  ln -s -- "$source" "$destination"
+  info "Linked: $destination"
 }
 
-# ---------------------------
-# Install config files
-# ---------------------------
-install_configs() {
-    info "Installing Loki's configuration files..."
-    echo ""
+activate_config() {
+  local module destination
+  local -a sources=("$REPO/.zshrc" "$REPO/.p10k.zsh" "$REPO/.nanorc" "$REPO/bin/zshcfg")
+  local -a destinations=("$CONFIG_HOME/.zshrc" "$CONFIG_HOME/.p10k.zsh" "$CONFIG_HOME/.nanorc" "$CONFIG_HOME/.local/bin/zshcfg")
+  for module in env options aliases functions keybinds; do
+    sources+=("$REPO/zsh/$module.zsh")
+    destinations+=("$CONFIG_HOME/.zsh_config/$module.zsh")
+  done
+  # Keep the module directory real so local.zsh stays outside the checkout.
+  [[ ! -L "$CONFIG_HOME/.zsh_config" ]] || fail 'Existing ~/.zsh_config is a symlink; preserve/move it before installing individual module links.'
+  mkdir -p -- "$CONFIG_HOME/.zsh_config" "$CONFIG_HOME/.local/bin"
+  for destination in "${destinations[@]}"; do
+    [[ ! -d "$destination" ]] || fail "A directory occupies a file destination: $destination"
+  done
+  for module in "${sources[@]}"; do [[ -f "$module" ]] || fail "Missing source: $module"; done
 
-    # Ensure ~/.zsh_config/ exists
-    mkdir -p "$ZSH_CONFIG_DIR"
-
-    # --- Main ZSH config ---
-    install_file ".zshrc.bak.*"       "$HOME/.zshrc"                    ".zshrc"
-
-    # --- Powerlevel10k config ---
-    install_file ".p10k.zsh"          "$HOME/.p10k.zsh"                 ".p10k.zsh"
-
-    # --- Modular configs ---
-    install_file "aliases.bak.*"      "$ZSH_CONFIG_DIR/aliases.zsh"     "aliases.zsh"
-    install_file "env.bak.*"          "$ZSH_CONFIG_DIR/env.zsh"         "env.zsh"
-    install_file "functions.bak.*"    "$ZSH_CONFIG_DIR/functions.zsh"   "functions.zsh"
-    install_file "keybinds.bak.*"     "$ZSH_CONFIG_DIR/keybinds.zsh"    "keybinds.zsh"
-    install_file "local.bak.*"        "$ZSH_CONFIG_DIR/local.zsh"       "local.zsh"
-    install_file "options.bak.*"      "$ZSH_CONFIG_DIR/options.zsh"     "options.zsh"
-
-    echo ""
+  ACTIVATING=true
+  local i
+  for (( i=0; i<${#sources[@]}; i++ )); do link_file "${sources[i]}" "${destinations[i]}"; done
+  # Never overwrite an existing local override (including symlinks).
+  if [[ ! -e "$CONFIG_HOME/.zsh_config/local.zsh" && ! -L "$CONFIG_HOME/.zsh_config/local.zsh" ]]; then
+    (umask 077; cp -- "$REPO/zsh/local.example.zsh" "$CONFIG_HOME/.zsh_config/local.zsh")
+  fi
+  ACTIVATING=false
 }
 
-# ---------------------------
-# Install wallpapers
-# ---------------------------
-install_wallpapers() {
-    local has_wallpapers=false
-
-    # Check if any wallpapers exist before printing the header
-    if [[ -f "$SCRIPT_DIR/night_temple_samurai.jpg" ]] || [[ -f "$SCRIPT_DIR/secondwallpp.jpg" ]]; then
-        has_wallpapers=true
+offer_default_shell() {
+  [[ "$NO_CHSH" != true ]] || return 0
+  # Alternate-home installations are for fixtures/staging, not account changes.
+  [[ "$CONFIG_HOME" == "$HOME" ]] || return 0
+  local zsh_path
+  zsh_path="$(command -v zsh)"
+  [[ "${SHELL:-}" != "$zsh_path" ]] || return 0
+  if confirm 'Make Zsh your default login shell?'; then
+    if ! grep -qxF "$zsh_path" /etc/shells; then
+      info "Zsh must be listed in /etc/shells first: $zsh_path"
+      return 0
     fi
-
-    if [[ "$has_wallpapers" == true ]]; then
-        info "Copying wallpapers to: ${PICTURES_DIR}/"
-        mkdir -p "$PICTURES_DIR"
-
-        if [[ -f "$SCRIPT_DIR/night_temple_samurai.jpg" ]]; then
-            cp "$SCRIPT_DIR/night_temple_samurai.jpg" "$PICTURES_DIR/night_temple_samurai.jpg"
-            success "night_temple_samurai.jpg  -->  ${PICTURES_DIR}/"
-        fi
-
-        if [[ -f "$SCRIPT_DIR/secondwallpp.jpg" ]]; then
-            cp "$SCRIPT_DIR/secondwallpp.jpg" "$PICTURES_DIR/twilight_landscape.jpg"
-            success "secondwallpp.jpg  -->  ${PICTURES_DIR}/twilight_landscape.jpg"
-        fi
-
-        echo ""
-    fi
+    chsh -s "$zsh_path" || info "Could not change login shell. You can run: chsh -s $zsh_path"
+  fi
 }
 
-# ---------------------------
-# Set ZSH as default shell
-# ---------------------------
-set_default_shell() {
-    local zsh_path
-    zsh_path="$(command -v zsh 2>/dev/null)"
-
-    if [[ -z "$zsh_path" ]]; then
-        warn "zsh not found. Skipping default shell change."
-        return
-    fi
-
-    # Check if zsh is already the default
-    if [[ "$SHELL" == "$zsh_path" ]]; then
-        success "zsh is already your default shell"
-        echo ""
-        return
-    fi
-
-    info "Changing your default shell to zsh..."
-    echo -e "  ${DIM}You may be prompted for your password.${RESET}"
-
-    # Ensure zsh is listed in /etc/shells
-    if ! grep -qx "$zsh_path" /etc/shells 2>/dev/null; then
-        echo "$zsh_path" | sudo tee -a /etc/shells >/dev/null
-    fi
-
-    if chsh -s "$zsh_path"; then
-        success "Default shell changed to zsh"
-    else
-        warn "Could not change default shell. Run manually: chsh -s ${zsh_path}"
-    fi
-
-    echo ""
-}
-
-# ---------------------------
-# Farewell
-# ---------------------------
-print_done() {
-    echo -e "${GREEN}${BOLD}"
-    echo "  ╔═══════════════════════════════════════════════╗"
-    echo "  ║                                               ║"
-    echo "  ║       Installation complete!                  ║"
-    echo "  ║                                               ║"
-    echo "  ╚═══════════════════════════════════════════════╝"
-    echo -e "${RESET}"
-    echo -e "  To apply the new config, either:"
-    echo -e "    ${CYAN}1.${RESET} Restart your terminal"
-    echo -e "    ${CYAN}2.${RESET} Run: ${WHITE}exec zsh${RESET}"
-    echo ""
-    echo -e "  ${DIM}Your old configs are safe in:${RESET}"
-    echo -e "  ${CYAN}${BACKUP_DIR}/${RESET}"
-    echo ""
-
-    if [[ -d "$PICTURES_DIR" ]]; then
-        local has_wp=false
-        [[ -f "$PICTURES_DIR/night_temple_samurai.jpg" ]] && has_wp=true
-        [[ -f "$PICTURES_DIR/twilight_landscape.jpg" ]] && has_wp=true
-        if [[ "$has_wp" == true ]]; then
-            echo -e "  ${DIM}Wallpapers saved to:${RESET}"
-            echo -e "  ${CYAN}${PICTURES_DIR}/${RESET}"
-            echo ""
-        fi
-    fi
-
-    echo -e "  ${MAGENTA}${BOLD}Enjoy the shell, traveler.${RESET}"
-    echo ""
-}
-
-# ============================================================
-# Main
-# ============================================================
-main() {
-    print_banner
-    refuse_root
-    verify_bundled_files
-    install_dependencies
-    ask_consent
-    backup_existing
-    install_configs
-    install_wallpapers
-    set_default_shell
-    print_done
-}
-
-main "$@"
+info "Permanent checkout: $REPO"
+info 'Existing config files will get adjacent dated backups; wallpapers are ignored.'
+if [[ "$ASSUME_YES" != true ]]; then
+  confirm 'Install the tools and link this configuration?' || { info 'Installation cancelled.'; exit 0; }
+fi
+if [[ "$SKIP_DEPS" != true ]]; then
+  install_dependencies
+else
+  info 'Dependency installation skipped; existing dependencies are your responsibility.'
+fi
+command -v git >/dev/null 2>&1 || fail 'Git is required.'
+command -v zsh >/dev/null 2>&1 || fail 'Zsh is required.'
+prepare_repo
+activate_config
+offer_default_shell
+info 'Installation complete. Open a new terminal or run: exec zsh'
+info 'nano uses line numbers; cat uses bat; ls uses eza when available.'

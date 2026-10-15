@@ -144,6 +144,103 @@ exec /usr/bin/git "$@"
         self.assertTrue((self.home / '.zshrc').is_symlink())
 
 
+    def test_invalid_sudo_caller_stops_before_changes(self):
+        if os.geteuid() != 0:
+            self.skipTest('requires root to exercise sudo caller resolution')
+        env = dict(self.env, SUDO_USER='zshcfg-no-such-user', SUDO_UID='65534')
+        self.assertIn('Cannot resolve sudo caller', self.install(expected=1, env=env).stderr)
+        self.assertFalse(self.repo.exists())
+        self.assertEqual((self.home / '.zshrc').read_text(), self.old_zshrc)
+        env = dict(self.env, SUDO_USER='nobody', SUDO_UID='0')
+        self.assertIn('do not match', self.install(expected=1, env=env).stderr)
+        self.assertFalse(self.repo.exists())
+
+    def prepare_unprivileged_fixture(self):
+        import pwd
+        if os.geteuid() != 0 or not shutil.which('sudo'):
+            self.skipTest('requires root and sudo for a real privilege drop')
+        try:
+            account = pwd.getpwnam('nobody')
+        except KeyError:
+            self.skipTest('requires the nobody test account')
+        self.root.chmod(0o755)
+        for directory in (self.home, self.seed):
+            try:
+                os.chown(directory, account.pw_uid, account.pw_gid)
+            except OSError as error:
+                if error.errno in (1, 22):
+                    self.skipTest('runtime cannot map a non-root UID/GID for ownership checks')
+                raise
+            for parent, dirs, files in os.walk(directory):
+                for name in dirs + files:
+                    os.chown(Path(parent) / name, account.pw_uid, account.pw_gid)
+        return account
+
+    def assert_user_owns_install(self, account):
+        self.assertEqual((self.home / '.zshrc').resolve(), self.repo / '.zshrc')
+        self.assertEqual((self.home / '.zshrc').read_text(), (self.repo / '.zshrc').read_text())
+        self.assertEqual(len(list(self.home.glob('.zshrc.bak.*'))), 1)
+        for path in self.home.rglob('*'):
+            self.assertEqual(path.lstat().st_uid, account.pw_uid, str(path))
+
+    def test_sudo_targets_caller_and_keeps_user_ownership(self):
+        account = self.prepare_unprivileged_fixture()
+        # Simulate sudo's caller metadata, then exercise REAL sudo -u calls.
+        env = dict(self.env, SUDO_USER=account.pw_name, SUDO_UID=str(account.pw_uid))
+        help_env = env.copy()
+        help_env.pop('ZSHCFG_HOME')
+        result = self.run_cmd('bash', str(self.seed / 'install.sh'), '--help', env=help_env)
+        self.assertIn(f'Install target: {account.pw_name} ({account.pw_dir})', result.stdout)
+        self.install(env=env)
+        self.assert_user_owns_install(account)
+        self.install(env=env)
+        self.assert_user_owns_install(account)
+        # Git's safe.directory check must work without configuration workarounds.
+        self.run_cmd('sudo', '-H', '-u', account.pw_name, '--', 'git', '-C',
+                     str(self.repo), 'status', '--porcelain')
+
+    def test_sudo_routes_home_operations_to_original_caller(self):
+        if os.geteuid() != 0:
+            self.skipTest('requires root to exercise sudo caller resolution')
+        fakebin = self.root / 'sudo tools'
+        fakebin.mkdir()
+        wrapper = fakebin / 'sudo'
+        wrapper.write_text('''#!/bin/bash
+printf '%s\\n' "$*" >> "$ZSHCFG_HOME/sudo-log"
+[[ "$1" == -H && "$2" == -u && "$3" == nobody && "$4" == -- ]] || exit 2
+shift 4
+exec "$@"
+''')
+        wrapper.chmod(0o755)
+        previous_nano = self.root / 'previous.nanorc'
+        previous_nano.write_text('# old linked nano config\n')
+        (self.home / '.nanorc').unlink()
+        (self.home / '.nanorc').symlink_to(previous_nano)
+        env = dict(self.env, SUDO_USER='nobody', SUDO_UID='65534',
+                   PATH=str(fakebin) + ':' + self.env['PATH'])
+        help_env = env.copy()
+        help_env.pop('ZSHCFG_HOME')
+        result = self.run_cmd('bash', str(self.seed / 'install.sh'), '--help', env=help_env)
+        self.assertIn('Install target: nobody (/nonexistent)', result.stdout)
+        self.install(env=env)
+        log = (self.home / 'sudo-log').read_text().splitlines()
+        self.assertTrue(all(line.startswith('-H -u nobody -- ') for line in log))
+        for command in ('git', 'mkdir', 'ln', 'mv', 'cp', 'rm'):
+            self.assertTrue(any('-- ' + command + ' ' in line for line in log), command)
+        self.assertEqual((self.home / '.zshrc').resolve(), self.repo / '.zshrc')
+        backups = list(self.home.glob('.nanorc.bak.*'))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), '# old linked nano config\n')
+
+    def test_normal_nonroot_user_installation(self):
+        account = self.prepare_unprivileged_fixture()
+        self.run_cmd('sudo', '-H', '-u', account.pw_name, '--', 'env',
+                     'ZSHCFG_HOME=' + str(self.home),
+                     'ZSHCFG_REMOTE=' + str(self.remote),
+                     'bash', str(self.seed / 'install.sh'),
+                     '--yes', '--skip-deps', '--no-chsh')
+        self.assert_user_owns_install(account)
+
     def test_standalone_bootstrap(self):
         standalone = self.outside / 'install.sh'
         shutil.copy2(self.seed / 'install.sh', standalone)

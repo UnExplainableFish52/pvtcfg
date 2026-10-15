@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-# Install a permanent, Git-tracked Zsh configuration. Run as your normal user.
+# Install a permanent, Git-tracked Zsh configuration, with or without sudo.
 # Download this file alone, or run it from a clone. The working directory is irrelevant.
 set -euo pipefail
 
+fail() { printf 'zshcfg: %s\n' "$*" >&2; exit 1; }
+
+# sudo may change HOME to /root. Resolve the original caller from the account
+# database instead, and verify the UID before touching any configuration files.
+INSTALL_USER="$(id -un)"
+INSTALL_UID="$EUID"
+INSTALL_HOME="$HOME"
+INSTALL_SHELL="${SHELL:-}"
+if (( EUID == 0 )) && [[ -n "${SUDO_USER:-}" ]]; then
+  caller_record="$(getent passwd "$SUDO_USER")" || fail "Cannot resolve sudo caller: $SUDO_USER"
+  IFS=: read -r INSTALL_USER _ INSTALL_UID _ _ INSTALL_HOME INSTALL_SHELL <<< "$caller_record"
+  [[ "$INSTALL_UID" =~ ^[0-9]+$ && "$INSTALL_UID" == "${SUDO_UID:-}" ]] || fail 'Sudo caller name and UID do not match.'
+fi
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-CONFIG_HOME="${ZSHCFG_HOME:-$HOME}"
+CONFIG_HOME="${ZSHCFG_HOME:-$INSTALL_HOME}"
 [[ "$CONFIG_HOME" == /* && "$CONFIG_HOME" != / ]] || { printf 'An absolute, non-root home path is required.\n' >&2; exit 1; }
 REPO="$CONFIG_HOME/.local/share/zshcfg/repo"
 REMOTE="${ZSHCFG_REMOTE:-https://github.com/UnExplainableFish52/pvtcfg.git}"
@@ -17,7 +31,6 @@ declare -a INSTALLED=() BACKUPS=()
 ACTIVATING=false
 
 info() { printf 'zshcfg: %s\n' "$*"; }
-fail() { printf 'zshcfg: %s\n' "$*" >&2; exit 1; }
 confirm() {
   local answer='n'
   read -r -p "$1 [y/N] " answer || true
@@ -25,6 +38,14 @@ confirm() {
 }
 as_admin() {
   if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
+}
+as_user() {
+  # Git, downloads, backups and links belong to the installing user, not root.
+  if (( EUID == 0 && INSTALL_UID != 0 )); then
+    sudo -H -u "$INSTALL_USER" -- "$@"
+  else
+    "$@"
+  fi
 }
 
 for option in "$@"; do
@@ -34,6 +55,7 @@ for option in "$@"; do
     --no-chsh) NO_CHSH=true ;;
     --help)
       printf 'Usage: bash install.sh [--yes] [--skip-deps] [--no-chsh]\n'
+      printf 'Install target: %s (%s)\n' "$INSTALL_USER" "$CONFIG_HOME"
       printf 'ZSHCFG_HOME selects an alternate home directory for isolated testing.\n'
       printf 'ZSHCFG_REMOTE / ZSHCFG_BRANCH select a fork or branch for standalone bootstrap.\n'
       exit 0 ;;
@@ -48,8 +70,8 @@ rollback() {
     printf 'zshcfg: Activation failed; restoring replaced configuration files.\n' >&2
     set +e
     for (( i=${#INSTALLED[@]}-1; i>=0; i-- )); do
-      rm -f -- "${INSTALLED[i]}"
-      if [[ -n "${BACKUPS[i]}" ]]; then mv -- "${BACKUPS[i]}" "${INSTALLED[i]}"; fi
+      as_user rm -f -- "${INSTALLED[i]}"
+      if [[ -n "${BACKUPS[i]}" ]]; then as_user mv -- "${BACKUPS[i]}" "${INSTALLED[i]}"; fi
     done
   fi
   exit "$result"
@@ -105,8 +127,8 @@ install_packages() {
 clone_dependency() {
   local url="$1" destination="$2" expected="$3"
   if [[ ! -e "$destination" ]]; then
-    mkdir -p -- "$(dirname -- "$destination")"
-    git clone --depth=1 "$url" "$destination"
+    as_user mkdir -p -- "$(dirname -- "$destination")"
+    as_user git clone --depth=1 "$url" "$destination"
   fi
   [[ -f "$destination/$expected" ]] || fail "Incomplete dependency: $destination (expected $expected)."
 }
@@ -121,23 +143,25 @@ install_dependencies() {
 }
 
 prepare_repo() {
-  mkdir -p -- "$(dirname -- "$REPO")"
+  as_user mkdir -p -- "$(dirname -- "$REPO")"
   [[ ! -L "$REPO" ]] || fail "The permanent checkout cannot be a symlink: $REPO"
   if [[ -e "$REPO" ]]; then
     [[ -d "$REPO/.git" ]] || fail "Existing path is not a normal Git checkout: $REPO"
     info 'Keeping the existing permanent checkout. Use zshcfg pull for updates.'
   elif [[ -f "$SCRIPT_DIR/.zshrc" && -f "$SCRIPT_DIR/bin/zshcfg" && -d "$SCRIPT_DIR/.git" ]]; then
-    [[ -z "$(git -C "$SCRIPT_DIR" status --porcelain)" ]] || fail 'Commit your checkout changes before installing so the permanent clone includes them.'
-    git clone --no-hardlinks "$SCRIPT_DIR" "$REPO"
+    local source_status
+    source_status="$(as_user git -C "$SCRIPT_DIR" status --porcelain)" || fail 'The installing user must be able to read the source Git checkout.'
+    [[ -z "$source_status" ]] || fail 'Commit your checkout changes before installing so the permanent clone includes them.'
+    as_user git clone --no-hardlinks "$SCRIPT_DIR" "$REPO"
     # A local clone should continue syncing with the original online remote.
     local source_remote source_branch
-    source_remote="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || printf '%s' "$REMOTE")"
-    git -C "$REPO" remote set-url origin "$source_remote"
-    source_branch="$(git -C "$REPO" symbolic-ref --short HEAD)"
-    git -C "$REPO" config "branch.$source_branch.remote" origin
-    git -C "$REPO" config "branch.$source_branch.merge" "refs/heads/$source_branch"
+    source_remote="$(as_user git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || printf '%s' "$REMOTE")"
+    as_user git -C "$REPO" remote set-url origin "$source_remote"
+    source_branch="$(as_user git -C "$REPO" symbolic-ref --short HEAD)"
+    as_user git -C "$REPO" config "branch.$source_branch.remote" origin
+    as_user git -C "$REPO" config "branch.$source_branch.merge" "refs/heads/$source_branch"
   else
-    git clone --branch "$BRANCH" "$REMOTE" "$REPO"
+    as_user git clone --branch "$BRANCH" "$REMOTE" "$REPO"
   fi
   [[ -f "$REPO/bin/zshcfg" && -f "$REPO/.zshrc" && -f "$REPO/VERSION" && -d "$REPO/zsh" ]] || fail 'The selected remote does not contain the new zshcfg layout. Select the implementation branch until it is merged.'
   bash -n "$REPO/install.sh"
@@ -158,16 +182,16 @@ link_file() {
     [[ ! -e "$backup" && ! -L "$backup" ]] || fail "Backup already exists: $backup"
     if [[ -L "$destination" && -f "$destination" ]]; then
       # Freeze old linked contents; later Git updates must not alter the backup.
-      cp -pL -- "$destination" "$backup"
-      rm -- "$destination"
+      as_user cp -pL -- "$destination" "$backup"
+      as_user rm -- "$destination"
     else
-      mv -- "$destination" "$backup"
+      as_user mv -- "$destination" "$backup"
     fi
     info "Backup: $backup"
   fi
   INSTALLED+=("$destination")
   BACKUPS+=("$backup")
-  ln -s -- "$source" "$destination"
+  as_user ln -s -- "$source" "$destination"
   info "Linked: $destination"
 }
 
@@ -181,7 +205,7 @@ activate_config() {
   done
   # Keep the module directory real so local.zsh stays outside the checkout.
   [[ ! -L "$CONFIG_HOME/.zsh_config" ]] || fail 'Existing ~/.zsh_config is a symlink; preserve/move it before installing individual module links.'
-  mkdir -p -- "$CONFIG_HOME/.zsh_config" "$CONFIG_HOME/.local/bin"
+  as_user mkdir -p -- "$CONFIG_HOME/.zsh_config" "$CONFIG_HOME/.local/bin"
   for destination in "${destinations[@]}"; do
     [[ ! -d "$destination" ]] || fail "A directory occupies a file destination: $destination"
   done
@@ -192,7 +216,7 @@ activate_config() {
   for (( i=0; i<${#sources[@]}; i++ )); do link_file "${sources[i]}" "${destinations[i]}"; done
   # Never overwrite an existing local override (including symlinks).
   if [[ ! -e "$CONFIG_HOME/.zsh_config/local.zsh" && ! -L "$CONFIG_HOME/.zsh_config/local.zsh" ]]; then
-    (umask 077; cp -- "$REPO/zsh/local.example.zsh" "$CONFIG_HOME/.zsh_config/local.zsh")
+    (umask 077; as_user cp -- "$REPO/zsh/local.example.zsh" "$CONFIG_HOME/.zsh_config/local.zsh")
   fi
   ACTIVATING=false
 }
@@ -200,19 +224,20 @@ activate_config() {
 offer_default_shell() {
   [[ "$NO_CHSH" != true ]] || return 0
   # Alternate-home installations are for fixtures/staging, not account changes.
-  [[ "$CONFIG_HOME" == "$HOME" ]] || return 0
+  [[ "$CONFIG_HOME" == "$INSTALL_HOME" ]] || return 0
   local zsh_path
   zsh_path="$(command -v zsh)"
-  [[ "${SHELL:-}" != "$zsh_path" ]] || return 0
+  [[ "$INSTALL_SHELL" != "$zsh_path" ]] || return 0
   if confirm 'Make Zsh your default login shell?'; then
     if ! grep -qxF "$zsh_path" /etc/shells; then
       info "Zsh must be listed in /etc/shells first: $zsh_path"
       return 0
     fi
-    chsh -s "$zsh_path" || info "Could not change login shell. You can run: chsh -s $zsh_path"
+    as_user chsh -s "$zsh_path" || info "Could not change login shell. You can run: chsh -s $zsh_path"
   fi
 }
 
+info "Installing for: $INSTALL_USER ($CONFIG_HOME)"
 info "Permanent checkout: $REPO"
 info 'Existing config files will get adjacent dated backups; wallpapers are ignored.'
 if [[ "$ASSUME_YES" != true ]]; then

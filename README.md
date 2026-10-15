@@ -18,7 +18,13 @@ bash install.sh
 ```
 
 The installer asks before proceeding and before changing the default login shell.
-Run as your normal user; it uses sudo only for missing system packages.
+Both `bash pvtcfg/install.sh` and `sudo bash pvtcfg/install.sh` are supported.
+Without sudo, it requests elevation only for missing system packages. With sudo,
+it resolves the original caller through the account database, keeps package
+installation privileged, and runs Git, backups, and file creation as that user.
+This targets the caller's home rather than `/root` and keeps installed files
+user-owned. A direct root session without sudo caller metadata targets root's HOME.
+You can check the selected user and home with `bash install.sh --help` (or sudo).
 It prepares Zsh, Git, curl, **Nano, fzf, ripgrep, bat, eza, Python and venv support**,
 Oh My Zsh, Powerlevel10k, autosuggestions and syntax highlighting.
 The terminal itself still needs a compatible icon font for the existing prompt.
@@ -166,7 +172,9 @@ python3 tests/test_workflow.py
 The navigation tests cover TSH reset boundaries and tp behavior. Workflow tests
 use real Git with local bare remotes and alternate homes, cover rollback,
 reinstallation, standalone bootstrap, versions, normal/rejected/forced pushes,
-clean/dirty/diverged pulls, aliases, and a real Nano PTY session. Package-manager
+clean/dirty/diverged pulls, aliases, and a real Nano PTY session. Additional checks
+cover caller validation, sudo target selection, and real non-root file ownership
+and Git access; these privilege checks require root and sudo. Package-manager
 and dependency-clone calls are mocked; they do not download/install host packages.
 They do not test distro package availability, real GitHub authentication, a real
 login-shell change, or the installed Powerlevel10k appearance.

@@ -4,12 +4,35 @@
 set -euo pipefail
 
 # The interface is dependency-free and never changes the terminal's font.
-RESET='' BOLD='' DIM='' CYAN='' MAGENTA='' GREEN=''
+RESET='' BOLD='' DIM='' CYAN='' MAGENTA='' GREEN='' BADGE=''
+LOGO_COLORS=()
+UI_WIDTH=80
 PLAIN=false PREVIEW=false NO_ANSI=false CURRENT_STAGE='preflight'
 init_style() {
+  UI_WIDTH="${COLUMNS:-80}"
+  if [[ -z "${COLUMNS:-}" && -t 1 ]] && command -v tput >/dev/null 2>&1; then
+    UI_WIDTH="$(tput cols 2>/dev/null || printf '80')"
+  fi
+  [[ "$UI_WIDTH" =~ ^[0-9]{1,3}$ ]] || UI_WIDTH=80
+  UI_WIDTH=$((10#$UI_WIDTH))
   if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR+x}" && "$NO_ANSI" == false && "$PLAIN" == false ]]; then
     RESET=$'\033[0m' BOLD=$'\033[1m' DIM=$'\033[2m'
     CYAN=$'\033[36m' MAGENTA=$'\033[35m' GREEN=$'\033[32m'
+    BADGE=$'\033[44;97m'
+    LOGO_COLORS=("$CYAN" "$CYAN" "$CYAN" "$MAGENTA" "$MAGENTA" "$MAGENTA")
+    case "${COLORTERM:-}:${TERM:-}" in
+      *truecolor*|*24bit*|*direct*)
+        CYAN=$'\033[38;2;77;220;240m' MAGENTA=$'\033[38;2;174;150;255m'
+        GREEN=$'\033[38;2;110;231;183m' BADGE=$'\033[48;2;77;220;240;38;2;10;18;32m'
+        LOGO_COLORS=($'\033[38;2;77;220;240m' $'\033[38;2;91;202;249m'
+          $'\033[38;2;112;181;255m' $'\033[38;2;135;163;255m'
+          $'\033[38;2;159;148;255m' $'\033[38;2;182;139;250m') ;;
+      *256color*)
+        CYAN=$'\033[38;5;80m' MAGENTA=$'\033[38;5;141m'
+        GREEN=$'\033[38;5;84m' BADGE=$'\033[48;5;80;38;5;17m'
+        LOGO_COLORS=($'\033[38;5;80m' $'\033[38;5;81m' $'\033[38;5;75m'
+          $'\033[38;5;111m' $'\033[38;5;141m' $'\033[38;5;177m') ;;
+    esac
   fi
 }
 fail() {
@@ -22,9 +45,7 @@ fail() {
 }
 
 rule() {
-  local width="${COLUMNS:-80}" line
-  [[ "$width" =~ ^[0-9]{1,3}$ ]] || width=80
-  width=$((10#$width))
+  local width="$UI_WIDTH" line
   (( width > 76 )) && width=76
   (( width < 20 )) && width=20
   printf -v line '%*s' "$width" ''
@@ -32,10 +53,14 @@ rule() {
 }
 
 banner() {
+  local line index=0
   printf '\n'
-  if [[ "$PLAIN" == false && ( -t 1 || "$PREVIEW" == true ) && "${COLUMNS:-80}" =~ ^[0-9]{1,3}$ ]] && (( 10#${COLUMNS:-80} >= 60 )); then
-    printf '%s%s' "$BOLD" "$CYAN"
-    cat <<'LOGO'
+  printf '  %s%s LOKI / SHELL ENVIRONMENT %s\n\n' "$BOLD" "$BADGE" "$RESET"
+  if [[ "$PLAIN" == false && ( -t 1 || "$PREVIEW" == true ) ]] && (( UI_WIDTH >= 60 )); then
+    while IFS= read -r line; do
+      printf '%s%s%s%s\n' "$BOLD" "${LOGO_COLORS[index]:-}" "$line" "$RESET"
+      index=$((index + 1))
+    done <<'LOGO'
    ______ _____ _    _  _____ ______ _____
   |___  // ____| |  | |/ ____|  ____/ ____|
      / /| (___ | |__| | |    | |__ | |  __
@@ -43,32 +68,56 @@ banner() {
    / /__ ____) | |  | | |____| |   | |__| |
   /_____|_____/|_|  |_|\_____|_|    \_____|
 LOGO
-    printf '%s' "$RESET"
   else
     printf '  %s%sZSHCFG%s / SHELL SETUP\n' "$BOLD" "$CYAN" "$RESET"
   fi
-  printf '\n  %sYOUR SHELL. YOUR SHORTCUTS. EVERY MACHINE.%s\n' "$MAGENTA" "$RESET"
-  printf '  Zsh + Powerlevel10k / Nano / modern CLI tools\n\n'
+  printf '\n  %s%sMY SHELL. MY SHORTCUTS. EVERY MACHINE.%s\n' "$BOLD" "$MAGENTA" "$RESET"
+  printf '  %sZsh + Powerlevel10k / Nano / modern CLI tools%s\n\n' "$DIM" "$RESET"
   rule
 }
 
-detail() { printf '  %s%-12s%s %s\n' "$DIM" "$1" "$RESET" "$2"; }
+detail() { printf '  %s%-13s%s %s\n' "$DIM" "$1" "$RESET" "$2"; }
+section() { printf '\n  %s%s%s%s\n\n' "$BOLD" "$MAGENTA" "$1" "$RESET"; }
+progress() {
+  local completed="$1" index
+  printf '  %s[' "$DIM"
+  for (( index=0; index<4; index++ )); do
+    if (( index < completed )); then
+      printf '%s====' "$GREEN"
+    else
+      printf '%s....' "$DIM"
+    fi
+  done
+  printf '%s]%s  %s/4 stages complete\n' "$DIM" "$RESET" "$completed"
+}
 step() {
   CURRENT_STAGE="$2"
-  printf '\n  %s%s[%s/4]%s %s%s%s\n' "$BOLD" "$CYAN" "$1" "$RESET" "$BOLD" "$2" "$RESET"
+  printf '\n  %s%s[%02d/04]%s %s%s%s\n' "$BOLD" "$CYAN" "$1" "$RESET" "$BOLD" "$2" "$RESET"
+  progress "$(( $1 - 1 ))"
   rule
 }
 finish() {
   printf '\n'
   rule
-  printf '  %s%s[ready] %s%s\n\n' "$BOLD" "$GREEN" "${1:-Your shell setup is installed.}" "$RESET"
-  detail 'START' 'Open a new terminal, or run: exec zsh'
+  printf '  %s%s[ready] %s%s\n' "$BOLD" "$GREEN" "${1:-My shell environment is ready.}" "$RESET"
+  if [[ "$PREVIEW" != true ]]; then progress 4; fi
+  section 'MY CONFIGURATION'
+  detail 'MODULES' "$CONFIG_HOME/.zsh_config/"
+  detail 'PROMPT' "$CONFIG_HOME/.p10k.zsh"
+  detail 'NANO' "$CONFIG_HOME/.nanorc"
+  detail 'SOURCE' "$REPO"
+  info 'My installed files are links; editing them updates my checkout directly.'
+  section 'MY EDIT / RELOAD / SYNC WORKFLOW'
+  detail '01 / EDIT' "nano \"$CONFIG_HOME/.zsh_config/aliases.zsh\""
+  detail '02 / RELOAD' 'exec zsh'
+  detail '03 / PUBLISH' 'shcfgpush'
+  detail 'OTHER PCS' 'shcfgpull && exec zsh'
   detail 'CHECK' 'shcfgcheck'
-  detail 'DOWNLOAD' 'shcfgpull'
-  detail 'PUBLISH' 'shcfgpush'
-  detail 'LOCAL' "$CONFIG_HOME/.zsh_config/local.zsh"
-  printf '\n  Select a Powerlevel10k-compatible icon font in your terminal settings.\n'
-  printf '  nano: line numbers / cat: bat / ls: eza (when available)\n'
+  section 'MY MACHINE-LOCAL SETTINGS'
+  detail 'PRIVATE' "nano \"$CONFIG_HOME/.zsh_config/local.zsh\""
+  info 'My local.zsh stays on this machine and is excluded from publishing.'
+  printf '\n  %sFONT%s  I select a Powerlevel10k-compatible icon font in my terminal settings.\n' "$CYAN" "$RESET"
+  printf '  %sTOOLS%s nano: line numbers / cat: bat / ls: eza (when available)\n' "$CYAN" "$RESET"
   rule
   printf '\n'
 }
@@ -98,7 +147,7 @@ STAMP="$(date +%Y-%m-%d_%H-%M-%S)-$$"
 declare -a INSTALLED=() BACKUPS=()
 ACTIVATING=false
 
-info() { printf '  %s[info]%s %s\n' "$DIM" "$RESET" "$*"; }
+info() { printf '  %s[info]%s %s\n' "$CYAN" "$RESET" "$*"; }
 confirm() {
   local answer='n'
   printf '\n  %s%s[?]%s %s %s[y/N]%s ' "$BOLD" "$MAGENTA" "$RESET" "$1" "$DIM" "$RESET"
@@ -142,17 +191,17 @@ init_style
 if [[ "$PREVIEW" == true ]]; then
   banner
   info 'INTERFACE PREVIEW ONLY. No commands are installed and no files are changed.'
-  detail 'USER' "$INSTALL_USER"
-  detail 'HOME' "$CONFIG_HOME"
-  step 1 'Prepare tools and shell plugins'
+  detail 'MY ACCOUNT' "$INSTALL_USER"
+  detail 'MY HOME' "$CONFIG_HOME"
+  step 1 'Prepare my tools and shell plugins'
   info 'Zsh, Git, curl, Nano, fzf, ripgrep, bat, eza, Python + venv'
   info 'Oh My Zsh, Powerlevel10k, autosuggestions, syntax highlighting'
-  step 2 'Prepare and validate your configuration'
+  step 2 'Prepare and validate my configuration'
   detail 'CHECKOUT' "$REPO"
-  step 3 'Back up and link your dotfiles'
+  step 3 'Back up and link my dotfiles'
   info 'Dated backups; private local.zsh stays on this machine.'
-  step 4 'Choose your default shell'
-  info 'The real installation asks before changing your login shell.'
+  step 4 'Choose my default shell'
+  info 'The real installation asks before changing my login shell.'
   finish 'Completion screen preview (no installation performed).'
   info 'Preview complete. Run bash install.sh to install.'
   printf '\n'
@@ -254,7 +303,7 @@ prepare_repo() {
   elif [[ -f "$SCRIPT_DIR/.zshrc" && -f "$SCRIPT_DIR/bin/zshcfg" && -d "$SCRIPT_DIR/.git" ]]; then
     local source_status
     source_status="$(as_user git -C "$SCRIPT_DIR" status --porcelain)" || fail 'The installing user must be able to read the source Git checkout.'
-    [[ -z "$source_status" ]] || fail 'Commit your checkout changes before installing so the permanent clone includes them.'
+    [[ -z "$source_status" ]] || fail 'My checkout has uncommitted changes. I need to commit them before installing.'
     as_user git clone --no-hardlinks "$SCRIPT_DIR" "$REPO"
     # A local clone should continue syncing with the original online remote.
     local source_remote source_branch
@@ -331,36 +380,36 @@ offer_default_shell() {
   local zsh_path
   zsh_path="$(command -v zsh)"
   [[ "$INSTALL_SHELL" != "$zsh_path" ]] || return 0
-  if confirm 'Make Zsh your default login shell?'; then
+  if confirm 'Make Zsh my default login shell?'; then
     if ! grep -qxF "$zsh_path" /etc/shells; then
       info "Zsh must be listed in /etc/shells first: $zsh_path"
       return 0
     fi
-    as_user chsh -s "$zsh_path" || info "Could not change login shell. You can run: chsh -s $zsh_path"
+    as_user chsh -s "$zsh_path" || info "Could not change my login shell. I can run: chsh -s $zsh_path"
   fi
 }
 
 banner
-detail 'USER' "$INSTALL_USER"
-detail 'HOME' "$CONFIG_HOME"
-detail 'CHECKOUT' "$REPO"
+detail 'MY ACCOUNT' "$INSTALL_USER"
+detail 'MY HOME' "$CONFIG_HOME"
+detail 'MY CHECKOUT' "$REPO"
 printf '\n'
-info 'Existing config files get dated backups. Private local overrides stay local.'
+info 'My existing config files get dated backups. My private overrides stay local.'
 if [[ "$ASSUME_YES" != true ]]; then
-  confirm 'Install the tools and link this configuration?' || { info 'Installation cancelled.'; exit 0; }
+  confirm 'Install my tools and link my configuration?' || { info 'Installation cancelled.'; exit 0; }
 fi
-step 1 'Prepare tools and shell plugins'
+step 1 'Prepare my tools and shell plugins'
 if [[ "$SKIP_DEPS" != true ]]; then
   install_dependencies
 else
-  info 'Dependency installation skipped; existing dependencies are your responsibility.'
+  info 'Dependency installation skipped; I am using my existing tools.'
 fi
 command -v git >/dev/null 2>&1 || fail 'Git is required.'
 command -v zsh >/dev/null 2>&1 || fail 'Zsh is required.'
-step 2 'Prepare and validate your configuration'
+step 2 'Prepare and validate my configuration'
 prepare_repo
-step 3 'Back up and link your dotfiles'
+step 3 'Back up and link my dotfiles'
 activate_config
-step 4 'Choose your default shell'
+step 4 'Choose my default shell'
 offer_default_shell
 finish

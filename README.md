@@ -9,18 +9,21 @@ git clone https://github.com/UnExplainableFish52/pvtcfg.git
 bash pvtcfg/install.sh
 ```
 
-You can run the installer by its path from any working directory. Alternatively,
-once this implementation is on the default branch, download just the installer:
+I can run the installer by its path from any working directory, or download
+just the installer:
 
 ```sh
 curl -fL https://raw.githubusercontent.com/UnExplainableFish52/pvtcfg/main/install.sh -o install.sh
 bash install.sh
 ```
 
-The installer has a cyan/magenta terminal interface, an ASCII title, four numbered
-installation stages, and a completion guide with the everyday commands. It uses
-your terminal's existing font and needs no extra display tools. Package-manager
-and Git output stays visible while work runs; failures identify the active stage.
+The installer uses first-person copy: **my shell, my shortcuts, every machine**.
+Its title fades from cyan to violet in terminals with truecolor or 256-color
+support, with standard ANSI colors as a fallback. Numbered phases include a
+progress bar counting completed stages. The completion guide lists my config
+locations and edit/reload/sync commands. It uses my terminal's existing font and
+needs no extra display tools. Package-manager and Git output stays visible while
+work runs; failures identify the active stage.
 Piped output uses a compact title and no ANSI colors. To preview the interface
 without installing anything:
 
@@ -43,7 +46,7 @@ You can check the selected user and home with `bash install.sh --help` (or sudo)
 It prepares Zsh, Git, curl, **Nano, fzf, ripgrep, bat, eza, Python and venv support**,
 Oh My Zsh, Powerlevel10k, autosuggestions and syntax highlighting.
 The terminal itself still needs a compatible icon font for the existing prompt.
-No GUI is required. Wallpapers are ignored.
+No GUI is required.
 
 Debian/Kali/Ubuntu package names are the primary target. Package mappings also
 exist for dnf, pacman, zypper and apk, but those distributions have not been
@@ -81,6 +84,53 @@ permanent checkout in place. Re-running installation retains it; updating is an
 explicit `zshcfg pull`. Installation from a Git clone requires committed files so
 the permanent clone contains the version you intended. A standalone installer or
 ZIP without Git history obtains the configured remote branch instead.
+
+## How I edit my configuration
+
+After installation, my permanent source checkout lives at
+`~/.local/share/zshcfg/repo`. My everyday config paths link into that checkout,
+so I can edit the installed files directly:
+
+| What I want to change | File I edit | Source inside the checkout |
+| --- | --- | --- |
+| Command shortcuts | `~/.zsh_config/aliases.zsh` | `zsh/aliases.zsh` |
+| Navigation and helper functions | `~/.zsh_config/functions.zsh` | `zsh/functions.zsh` |
+| Environment variables and editor defaults | `~/.zsh_config/env.zsh` | `zsh/env.zsh` |
+| History and shell options | `~/.zsh_config/options.zsh` | `zsh/options.zsh` |
+| Keyboard bindings | `~/.zsh_config/keybinds.zsh` | `zsh/keybinds.zsh` |
+| Prompt appearance | `~/.p10k.zsh` | `.p10k.zsh` |
+| Nano settings | `~/.nanorc` | `.nanorc` |
+| Startup and plugin loading | `~/.zshrc` | `.zshrc` |
+| Private or machine-specific settings | `~/.zsh_config/local.zsh` | Local file, excluded from Git |
+
+For example, I edit my aliases:
+
+```sh
+nano ~/.zsh_config/aliases.zsh
+```
+
+In Nano, I save with **Ctrl+O**, press **Enter** to confirm the filename, then
+exit with **Ctrl+X**. I reload my shell and publish the change:
+
+```sh
+exec zsh
+shcfgpush
+```
+
+`shcfgpush` asks for my commit message, commits the managed config changes, and
+pushes them to the remote. My Git author identity and GitHub authentication need
+to be configured on this machine. On another installed machine, I download the
+change and reload:
+
+```sh
+shcfgpull && exec zsh
+```
+
+I keep the permanent checkout in place because the installed files link to it.
+I edit that checkout through these links, rather than a separate installer clone.
+For secrets, local paths, or settings that should stay on one machine, I use
+`nano ~/.zsh_config/local.zsh`; that file loads last and is never published by
+`shcfgpush`.
 
 ## Daily tools
 

@@ -68,6 +68,8 @@ class Workflow(unittest.TestCase):
                             '--skip-deps', '--no-chsh', expected=expected, env=env)
 
     def cli(self, *args, **kwargs):
+        if args and args[0] in ('push', 'publish'):
+            kwargs.setdefault('input', 'Update test configuration\n')
         return self.run_cmd('bash', str(self.repo / 'bin/zshcfg'), *args, **kwargs)
 
     def peer_change(self, text='# remote change\n'):
@@ -365,13 +367,16 @@ source "$ZSHCFG_HOME/.zshrc"
 [[ "$EDITOR" == nano && "$VISUAL" == nano ]] || exit 1
 [[ "$HISTFILE" == "$ZSHCFG_HOME/.zsh_history" ]] || exit 1
 if (( $+aliases[vi] || $+aliases[vim] )); then exit 1; fi
-alias cat ls ll chkv
+alias cat ls ll chkv shcfgpush shcfgpull shcfgcheck
 eval 'cat example.txt'
 eval 'ls'
 zshcfg v
 ''', env=env)
         self.assertIn('batcat --style=numbers --paging=never', result.stdout)
         self.assertIn('eza --group-directories-first', result.stdout)
+        self.assertIn('shcfgpush=\'zshcfg push\'', result.stdout)
+        self.assertIn('shcfgpull=\'zshcfg pull\'', result.stdout)
+        self.assertIn('shcfgcheck=\'zshcfg check\'', result.stdout)
         self.assertIn('1.26.10.15.0', result.stdout)
 
     @unittest.skipUnless(shutil.which('nano'), 'nano is not installed')

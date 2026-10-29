@@ -8,8 +8,8 @@ REPO="$(cd -- "$(dirname -- "$SCRIPT_PATH")/.." && pwd -P)"
 CONFIG_HOME="${ZSHCFG_HOME:-$HOME}"
 STATE="$CONFIG_HOME/.local/state/zshcfg"
 # Only these paths are automatically staged by publish. local.zsh is excluded.
-MANAGED=(VERSION .zshrc .nanorc .p10k.zsh zsh bin install.sh .gitignore ':(exclude)zsh/local.zsh')
-CONTENT=(.zshrc .nanorc .p10k.zsh zsh bin install.sh .gitignore ':(exclude)zsh/local.zsh')
+MANAGED=(VERSION .zshrc .nanorc .p10k.zsh zsh bin install.sh .gitignore .gitattributes ':(exclude)zsh/local.zsh')
+CONTENT=(.zshrc .nanorc .p10k.zsh zsh bin install.sh .gitignore .gitattributes ':(exclude)zsh/local.zsh')
 
 gitcfg() { git -C "$REPO" "$@"; }
 fail() { printf 'zshcfg: %s\n' "$*" >&2; exit 1; }
@@ -19,12 +19,15 @@ Usage:
   zshcfg v | V | version     Show version and local edit status
   zshcfg check | chkv        Compare with remote; offer a pull when behind
   zshcfg pull                Update a clean checkout, fast-forward only
-  zshcfg push | publish      Commit managed changes and push
+  zshcfg push | publish      Ask for a message, commit managed changes and push
+  zshcfg push -m MESSAGE     Supply the commit message without a prompt
   zshcfg push force          Force-with-lease using the last checked remote
   zshcfg publish force       Same as push force
   zshcfg help                Show this help
 
 chkv is also a shell alias for zshcfg check.
+shcfgpush is a shell shortcut for zshcfg push (accepts -m MESSAGE).
+shcfgpull and shcfgcheck run zshcfg pull and zshcfg check.
 The word force applies only to push/publish. Git's original errors are retained.
 HELP
 }
@@ -58,8 +61,8 @@ current_version() {
   if [[ "$fingerprint" != "$previous" ]] || ! valid_version "$cached"; then
     major="${recorded%%.*}"
     cached="$major.$(date +%y.%m.%d).1"
-    mkdir -p -- "$STATE"
-    printf '%s %s\n' "$fingerprint" "$cached" > "$STATE/dirty-version"
+    mkdir -p -- "$STATE" || return $?
+    printf '%s %s\n' "$fingerprint" "$cached" > "$STATE/dirty-version" || return $?
   fi
   printf '%s\n' "$cached"
 }
@@ -140,22 +143,36 @@ validate_config() {
 }
 
 publish_config() {
-  local mode="${1:-}" file version expected_remote='' expected_ref='' expected_sha='' stamp result
+  local mode="$1" message="$2" file version expected_remote='' expected_ref='' expected_sha='' stamp result
   upstream
   # Do not accidentally commit somebody's unrelated staged README/image/etc.
   while IFS= read -r -d '' file; do
     case "$file" in
-      VERSION|.zshrc|.nanorc|.p10k.zsh|zsh/*|bin/*|install.sh|.gitignore) ;;
+      VERSION|.zshrc|.nanorc|.p10k.zsh|zsh/*|bin/*|install.sh|.gitignore|.gitattributes) ;;
       *) fail "Unrelated staged file: $file. Unstage it before publishing configs." ;;
     esac
     case "$file" in local.zsh|zsh/local.zsh) fail 'Private local overrides must not be staged.' ;; esac
   done < <(gitcfg diff --cached --name-only -z)
   validate_config || fail 'Shell syntax check failed. No commit or push was made.'
-  version="$(current_version)"
-  printf '%s\n' "$version" > "$REPO/VERSION"
-  gitcfg add -A -- "${MANAGED[@]}"
-  if ! gitcfg diff --cached --quiet; then
-    gitcfg commit -m "Update Zsh configuration $version ($(date +%Y-%m-%d_%H-%M-%S))"
+  if [[ -n "$(gitcfg status --porcelain -- "${MANAGED[@]}")" ]]; then
+    printf 'Configuration changes to include:\n'
+    gitcfg status --short -- "${MANAGED[@]}"
+    # Ask BEFORE staging or changing VERSION. Empty input/EOF cancels cleanly.
+    if [[ -z "$message" ]]; then
+      printf 'Commit message (leave blank to cancel): '
+      IFS= read -r message || fail 'No message received. No commit or push was made; retry with -m "Your message".'
+    fi
+    [[ "$message" =~ [^[:space:]] ]] || fail 'Empty message; cancelled. No commit or push was made.'
+    version="$(current_version)"
+    printf '%s\n' "$version" > "$REPO/VERSION"
+    # Enumerate eligible paths first: ignored local files must never be staged.
+    # NUL separators preserve filenames with spaces, newlines or Git metacharacters.
+    gitcfg ls-files -z --cached --others --exclude-standard -- "${MANAGED[@]}" |
+      gitcfg --literal-pathspecs add -A --pathspec-from-file=- --pathspec-file-nul
+    gitcfg commit -m "$message"
+  else
+    version="$(current_version)"
+    printf 'No new configuration changes; pushing existing local commits.\n'
   fi
   if [[ "$mode" == force ]]; then
     [[ -f "$STATE/checked-remote" ]] || fail 'Run zshcfg check first to inspect the remote before a forced push. Your local commit is saved.'
@@ -183,7 +200,9 @@ publish_config() {
   fi
 }
 
-[[ "$(gitcfg rev-parse --show-toplevel)" == "$REPO" ]] || fail 'This script must live in its Zsh configuration Git checkout.'
+GIT_ROOT="$(gitcfg rev-parse --show-toplevel)"
+# Git for Windows reports C:/... while Bash uses /c/...; compare physical paths.
+[[ "$(cd -- "$GIT_ROOT" && pwd -P)" == "$REPO" ]] || fail 'This script must live in its Zsh configuration Git checkout.'
 action="${1:-help}"
 case "$action" in
   v|V|version)
@@ -196,8 +215,21 @@ case "$action" in
     (( $# == 1 )) || fail 'Usage: zshcfg pull (force is not supported)'
     pull_config ;;
   push|publish)
-    (( $# == 1 )) || { (( $# == 2 )) && [[ "$2" == force ]]; } || fail 'Usage: zshcfg push [force]'
-    publish_config "${2:-}" ;;
+    shift
+    mode='' message='' message_set=false
+    while (( $# )); do
+      case "$1" in
+        force) [[ -z "$mode" ]] || fail 'force was supplied more than once.'; mode=force; shift ;;
+        -m|--message)
+          (( $# >= 2 )) && [[ "$message_set" == false ]] || fail 'Usage: zshcfg push [force] [-m MESSAGE]'
+          message="$2"; message_set=true; shift 2 ;;
+        *) fail 'Usage: zshcfg push [force] [-m MESSAGE]' ;;
+      esac
+    done
+    if [[ "$message_set" == true ]]; then
+      [[ "$message" =~ [^[:space:]] ]] || fail 'Commit message must not be empty.'
+    fi
+    publish_config "$mode" "$message" ;;
   help)
     (( $# <= 1 )) || fail 'Usage: zshcfg help'
     usage ;;

@@ -90,9 +90,10 @@ when you specifically need their original behavior.
 | Command | Action |
 | --- | --- |
 | `zshcfg v`, `zshcfg V`, `zshcfg version` | Show version and local modification status |
-| `chkv`, `zshcfg chkv`, `zshcfg check` | Fetch upstream information and report commit counts and remote version |
-| `zshcfg pull` | Update a clean checkout with a fast-forward; never merge/rebase/discard edits |
-| `zshcfg push`, `zshcfg publish` | Syntax-check, commit managed changes, then push |
+| `shcfgcheck`, `chkv`, `zshcfg chkv`, `zshcfg check` | Fetch upstream information and report commit counts and remote version |
+| `shcfgpull`, `zshcfg pull` | Update a clean checkout with a fast-forward; never merge/rebase/discard edits |
+| `shcfgpush`, `zshcfg push`, `zshcfg publish` | Show changed files, ask for a commit message, commit managed changes together, then push |
+| `shcfgpush -m "MESSAGE"` | Publish with a message supplied directly |
 | `zshcfg push force`, `zshcfg publish force` | Explicit force-with-lease push |
 | `zshcfg help` | Display the command list |
 
@@ -103,12 +104,37 @@ histories and dirty pulls stop with guidance to use ordinary Git. No automatic
 integration workspace, merge, rebase or force-pull is involved.
 
 Publishing stages only `VERSION`, `.zshrc`, `.nanorc`, `.p10k.zsh`, `zsh/`, `bin/`,
-`install.sh`, and `.gitignore`, excluding `zsh/local.zsh`. Unrelated files already
+`install.sh`, `.gitignore`, and `.gitattributes`, excluding `zsh/local.zsh`. Unrelated files already
 staged cause it to stop. README, tests and images can be committed with ordinary
 Git. Git's author identity, authentication and repository permissions must already
 be configured. Errors retain the original Git output and a nonzero exit status;
 a failed push leaves your local commit saved. `0` means success. Unknown commands
 use exit code `2`; ordinary workflow refusals use `1`.
+
+For example, after installation:
+
+```sh
+nano ~/.zsh_config/aliases.zsh
+shcfgpush
+# Commit message (leave blank to cancel): Add my project navigation alias
+```
+
+The linked files already belong to the permanent checkout, so the shortcut works
+from any directory. Added, modified and deleted managed files go into one commit;
+unchanged files need no new changes. Blank/whitespace input or end-of-input cancels
+before staging or changing VERSION. For scripts, use `shcfgpush -m "Your message"`.
+With no new managed changes, publishing pushes existing local commits without
+asking for another message, including a retry after a failed push.
+
+On a second machine, clone this repository and run `bash pvtcfg/install.sh` to
+install the saved configuration. Later, run `shcfgpull` to import updates, then
+open a new terminal or run `exec zsh` to load them. Pulling preserves local edits
+by refusing a dirty checkout, and stops if histories have diverged. It does not
+run automatically at startup. Your existing Git authentication and permissions
+are used for both uploading and downloading.
+
+`.gitattributes` enforces LF line endings for text, including shell scripts, even
+when the checkout is on Windows. Images remain binary.
 
 Force publishing requires a prior `zshcfg check`. It uses the exact remote commit
 observed during that check as its lease, so an intervening remote change rejects
@@ -167,6 +193,7 @@ prefix search with Up/Down, Emacs keys, and the existing Powerlevel10k prompt.
 ```sh
 python3 tests/test_navigation.py
 python3 tests/test_workflow.py
+python3 tests/test_publish.py
 ```
 
 The navigation tests cover TSH reset boundaries and tp behavior. Workflow tests
@@ -178,6 +205,10 @@ and Git access; these privilege checks require root and sudo. Package-manager
 and dependency-clone calls are mocked; they do not download/install host packages.
 They do not test distro package availability, real GitHub authentication, a real
 login-shell change, or the installed Powerlevel10k appearance.
+The portable publish tests use real local Git remotes to check prompted messages,
+cancellation, multi-file commits, private-file exclusion, rejected-push retries,
+second-machine pulls, and LF checkouts. Only Zsh syntax validation is stubbed in
+that portable suite; the Linux workflow suite exercises real Zsh.
 
 Installer options: `--yes` skips installation confirmation, `--no-chsh` skips the
 login-shell prompt, and `--skip-deps` assumes dependencies are already installed.

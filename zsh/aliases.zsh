@@ -25,6 +25,9 @@ alias ping='ping -c 4'
 
 # Editor defaults are configured in env.zsh; vi/vim keep their normal meanings.
 alias chkv='zshcfg check'
+alias shcfgpush='zshcfg push'
+alias shcfgpull='zshcfg pull'
+alias shcfgcheck='zshcfg check'
 
 # -------------------------
 # Safer defaults

@@ -1,0 +1,4 @@
+# Keep configuration and scripts usable on Linux, including Windows checkouts.
+* text=auto eol=lf
+*.jpg binary
+*.png binary

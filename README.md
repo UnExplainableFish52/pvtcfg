@@ -17,6 +17,21 @@ curl -fL https://raw.githubusercontent.com/UnExplainableFish52/pvtcfg/main/insta
 bash install.sh
 ```
 
+The installer has a cyan/magenta terminal interface, an ASCII title, four numbered
+installation stages, and a completion guide with the everyday commands. It uses
+your terminal's existing font and needs no extra display tools. Package-manager
+and Git output stays visible while work runs; failures identify the active stage.
+Piped output uses a compact title and no ANSI colors. To preview the interface
+without installing anything:
+
+```sh
+bash install.sh --preview
+```
+
+Use `--no-color` (or set `NO_COLOR`) to disable colors, or `--plain` for a compact,
+unstyled interface. The large title automatically collapses in narrow terminals.
+The preview shows the stages without running them.
+
 The installer asks before proceeding and before changing the default login shell.
 Both `bash pvtcfg/install.sh` and `sudo bash pvtcfg/install.sh` are supported.
 Without sudo, it requests elevation only for missing system packages. With sudo,
@@ -209,6 +224,10 @@ The portable publish tests use real local Git remotes to check prompted messages
 cancellation, multi-file commits, private-file exclusion, rejected-push retries,
 second-machine pulls, and LF checkouts. Only Zsh syntax validation is stubbed in
 that portable suite; the Linux workflow suite exercises real Zsh.
+
+Installer display options: `--preview` displays the interface without changes,
+`--no-color` disables ANSI styling, and `--plain` uses a compact, unstyled title.
+`NO_COLOR` and `TERM=dumb` also disable ANSI styling.
 
 Installer options: `--yes` skips installation confirmation, `--no-chsh` skips the
 login-shell prompt, and `--skip-deps` assumes dependencies are already installed.

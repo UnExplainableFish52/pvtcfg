@@ -3,7 +3,75 @@
 # Download this file alone, or run it from a clone. The working directory is irrelevant.
 set -euo pipefail
 
-fail() { printf 'zshcfg: %s\n' "$*" >&2; exit 1; }
+# The interface is dependency-free and never changes the terminal's font.
+RESET='' BOLD='' DIM='' CYAN='' MAGENTA='' GREEN=''
+PLAIN=false PREVIEW=false NO_ANSI=false CURRENT_STAGE='preflight'
+init_style() {
+  if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR+x}" && "$NO_ANSI" == false && "$PLAIN" == false ]]; then
+    RESET=$'\033[0m' BOLD=$'\033[1m' DIM=$'\033[2m'
+    CYAN=$'\033[36m' MAGENTA=$'\033[35m' GREEN=$'\033[32m'
+  fi
+}
+fail() {
+  if [[ -t 2 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR+x}" && "$NO_ANSI" == false && "$PLAIN" == false ]]; then
+    printf '\033[31;1m  [error]\033[0m %s\n' "$*" >&2
+  else
+    printf 'zshcfg: %s\n' "$*" >&2
+  fi
+  exit 1
+}
+
+rule() {
+  local width="${COLUMNS:-80}" line
+  [[ "$width" =~ ^[0-9]{1,3}$ ]] || width=80
+  width=$((10#$width))
+  (( width > 76 )) && width=76
+  (( width < 20 )) && width=20
+  printf -v line '%*s' "$width" ''
+  printf '%s%s%s\n' "$DIM" "${line// /-}" "$RESET"
+}
+
+banner() {
+  printf '\n'
+  if [[ "$PLAIN" == false && ( -t 1 || "$PREVIEW" == true ) && "${COLUMNS:-80}" =~ ^[0-9]{1,3}$ ]] && (( 10#${COLUMNS:-80} >= 60 )); then
+    printf '%s%s' "$BOLD" "$CYAN"
+    cat <<'LOGO'
+   ______ _____ _    _  _____ ______ _____
+  |___  // ____| |  | |/ ____|  ____/ ____|
+     / /| (___ | |__| | |    | |__ | |  __
+    / /  \___ \|  __  | |    |  __|| | |_ |
+   / /__ ____) | |  | | |____| |   | |__| |
+  /_____|_____/|_|  |_|\_____|_|    \_____|
+LOGO
+    printf '%s' "$RESET"
+  else
+    printf '  %s%sZSHCFG%s / SHELL SETUP\n' "$BOLD" "$CYAN" "$RESET"
+  fi
+  printf '\n  %sYOUR SHELL. YOUR SHORTCUTS. EVERY MACHINE.%s\n' "$MAGENTA" "$RESET"
+  printf '  Zsh + Powerlevel10k / Nano / modern CLI tools\n\n'
+  rule
+}
+
+detail() { printf '  %s%-12s%s %s\n' "$DIM" "$1" "$RESET" "$2"; }
+step() {
+  CURRENT_STAGE="$2"
+  printf '\n  %s%s[%s/4]%s %s%s%s\n' "$BOLD" "$CYAN" "$1" "$RESET" "$BOLD" "$2" "$RESET"
+  rule
+}
+finish() {
+  printf '\n'
+  rule
+  printf '  %s%s[ready] %s%s\n\n' "$BOLD" "$GREEN" "${1:-Your shell setup is installed.}" "$RESET"
+  detail 'START' 'Open a new terminal, or run: exec zsh'
+  detail 'CHECK' 'shcfgcheck'
+  detail 'DOWNLOAD' 'shcfgpull'
+  detail 'PUBLISH' 'shcfgpush'
+  detail 'LOCAL' "$CONFIG_HOME/.zsh_config/local.zsh"
+  printf '\n  Select a Powerlevel10k-compatible icon font in your terminal settings.\n'
+  printf '  nano: line numbers / cat: bat / ls: eza (when available)\n'
+  rule
+  printf '\n'
+}
 
 # sudo may change HOME to /root. Resolve the original caller from the account
 # database instead, and verify the UID before touching any configuration files.
@@ -30,10 +98,11 @@ STAMP="$(date +%Y-%m-%d_%H-%M-%S)-$$"
 declare -a INSTALLED=() BACKUPS=()
 ACTIVATING=false
 
-info() { printf 'zshcfg: %s\n' "$*"; }
+info() { printf '  %s[info]%s %s\n' "$DIM" "$RESET" "$*"; }
 confirm() {
   local answer='n'
-  read -r -p "$1 [y/N] " answer || true
+  printf '\n  %s%s[?]%s %s %s[y/N]%s ' "$BOLD" "$MAGENTA" "$RESET" "$1" "$DIM" "$RESET"
+  read -r answer || true
   [[ "$answer" == [yY] ]]
 }
 as_admin() {
@@ -53,8 +122,14 @@ for option in "$@"; do
     --yes) ASSUME_YES=true ;;
     --skip-deps) SKIP_DEPS=true ;;
     --no-chsh) NO_CHSH=true ;;
+    --no-color) NO_ANSI=true ;;
+    --plain) PLAIN=true ;;
+    --preview) PREVIEW=true ;;
     --help)
-      printf 'Usage: bash install.sh [--yes] [--skip-deps] [--no-chsh]\n'
+      printf 'Usage: bash install.sh [--yes] [--skip-deps] [--no-chsh] [--no-color] [--plain] [--preview]\n'
+      printf '  --no-color  Disable ANSI styling (also respects NO_COLOR).\n'
+      printf '  --plain     Use a compact banner without ANSI styling.\n'
+      printf '  --preview   Show the interface without installing or changing files.\n'
       printf 'Install target: %s (%s)\n' "$INSTALL_USER" "$CONFIG_HOME"
       printf 'ZSHCFG_HOME selects an alternate home directory for isolated testing.\n'
       printf 'ZSHCFG_REMOTE / ZSHCFG_BRANCH select a fork or branch for standalone bootstrap.\n'
@@ -62,6 +137,27 @@ for option in "$@"; do
     *) fail "Unknown option: $option" ;;
   esac
 done
+init_style
+
+if [[ "$PREVIEW" == true ]]; then
+  banner
+  info 'INTERFACE PREVIEW ONLY. No commands are installed and no files are changed.'
+  detail 'USER' "$INSTALL_USER"
+  detail 'HOME' "$CONFIG_HOME"
+  step 1 'Prepare tools and shell plugins'
+  info 'Zsh, Git, curl, Nano, fzf, ripgrep, bat, eza, Python + venv'
+  info 'Oh My Zsh, Powerlevel10k, autosuggestions, syntax highlighting'
+  step 2 'Prepare and validate your configuration'
+  detail 'CHECKOUT' "$REPO"
+  step 3 'Back up and link your dotfiles'
+  info 'Dated backups; private local.zsh stays on this machine.'
+  step 4 'Choose your default shell'
+  info 'The real installation asks before changing your login shell.'
+  finish 'Completion screen preview (no installation performed).'
+  info 'Preview complete. Run bash install.sh to install.'
+  printf '\n'
+  exit 0
+fi
 
 # Config activation is reversible. Dependencies and the checkout are kept on failure.
 rollback() {
@@ -73,6 +169,9 @@ rollback() {
       as_user rm -f -- "${INSTALLED[i]}"
       if [[ -n "${BACKUPS[i]}" ]]; then as_user mv -- "${BACKUPS[i]}" "${INSTALLED[i]}"; fi
     done
+  fi
+  if (( result != 0 )); then
+    printf 'zshcfg: Installation stopped during: %s. Fix the error above, then rerun.\n' "$CURRENT_STAGE" >&2
   fi
   exit "$result"
 }
@@ -89,7 +188,10 @@ install_packages() {
   if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
     wanted+=(venv)
   fi
-  (( ${#wanted[@]} )) || return 0
+  if (( ${#wanted[@]} == 0 )); then
+    info 'All required command-line tools are already available.'
+    return 0
+  fi
 
   for manager in apt-get dnf pacman zypper apk; do
     command -v "$manager" >/dev/null 2>&1 && break
@@ -126,6 +228,7 @@ install_packages() {
 
 clone_dependency() {
   local url="$1" destination="$2" expected="$3"
+  info "Shell component: ${destination##*/}"
   if [[ ! -e "$destination" ]]; then
     as_user mkdir -p -- "$(dirname -- "$destination")"
     as_user git clone --depth=1 "$url" "$destination"
@@ -237,12 +340,16 @@ offer_default_shell() {
   fi
 }
 
-info "Installing for: $INSTALL_USER ($CONFIG_HOME)"
-info "Permanent checkout: $REPO"
-info 'Existing config files will get adjacent dated backups; wallpapers are ignored.'
+banner
+detail 'USER' "$INSTALL_USER"
+detail 'HOME' "$CONFIG_HOME"
+detail 'CHECKOUT' "$REPO"
+printf '\n'
+info 'Existing config files get dated backups. Private local overrides stay local.'
 if [[ "$ASSUME_YES" != true ]]; then
   confirm 'Install the tools and link this configuration?' || { info 'Installation cancelled.'; exit 0; }
 fi
+step 1 'Prepare tools and shell plugins'
 if [[ "$SKIP_DEPS" != true ]]; then
   install_dependencies
 else
@@ -250,8 +357,10 @@ else
 fi
 command -v git >/dev/null 2>&1 || fail 'Git is required.'
 command -v zsh >/dev/null 2>&1 || fail 'Zsh is required.'
+step 2 'Prepare and validate your configuration'
 prepare_repo
+step 3 'Back up and link your dotfiles'
 activate_config
+step 4 'Choose your default shell'
 offer_default_shell
-info 'Installation complete. Open a new terminal or run: exec zsh'
-info 'nano uses line numbers; cat uses bat; ls uses eza when available.'
+finish

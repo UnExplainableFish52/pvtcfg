@@ -3,122 +3,209 @@
 # Download this file alone, or run it from a clone. The working directory is irrelevant.
 set -euo pipefail
 
-# The interface is dependency-free and never changes the terminal's font.
-RESET='' BOLD='' DIM='' CYAN='' MAGENTA='' GREEN='' BADGE=''
-LOGO_COLORS=()
-UI_WIDTH=80
+# Small, self-contained UI: standalone downloads need no extra files or tools.
+RESET='' BOLD='' GRAY='' GOLD='' GREEN='' CYAN=''
+COLOR_MODE=none UI_WIDTH=80 UI_UTF8=false
 PLAIN=false PREVIEW=false NO_ANSI=false CURRENT_STAGE='preflight'
+SPINNER_PID='' CURRENT_STEP=0 LOG_FILE=''
+PIXEL_FG=() PIXEL_BG=()
+PALETTE_SYMBOLS='.gyhsdvGcb'
+# Hand-placed pixels: gold horns, slate hair, cream face, green cape, blue magic.
+# Two pixel rows share one terminal row. Dots leave the terminal background alone.
+LOKI_PIXELS=(
+  'b..........y..........y.....'
+  '.b........yy.........yy.....'
+  '.bc......yy.........yy......'
+  '..cc.....yg.........yg......'
+  '..c......yg.........yg......'
+  '..cc......yg..hhhh..yg......'
+  '.cccc......yggyyyyggg.......'
+  '...cc.....hhgyyyygyhh.......'
+  '....cg...hhsssssssssshh.....'
+  '....g....hhssddsssdsshh.....'
+  '....g....hhsssssssssshh.....'
+  '....g.....hssssdsdsssh......'
+  '....g......hssssdsssh.......'
+  '....g.......hhhhhhhv........'
+  '....g.....hvvsyyvvvGvv......'
+  '.....g...hvvvGvvGGvGvvvvv...'
+  '......g.hvvvhGvGhhvGvvvvvvv.'
+  '.......hvGvhGvGhhhvGvvvvvv..'
+  '........hGvhGvGhhhvGvvv.....'
+  '........hGvhGvGhhhhGv.......'
+  '.......hhGvhGvGhhhhh........'
+  '.......hGGvhGvGhhh..........'
+  '.........dhh..hhd...........'
+  '.........ddd..ddd...........'
+)
+
+set_palette() {
+  local index code
+  local -a rgb=('' '211;157;47' '247;211;111' '70;80;96' '239;230;188'
+    '35;44;56' '79;153;66' '44;107;58' '48;187;219' '38;130;184')
+  local -a indexed=(0 178 222 240 230 237 71 29 80 32)
+  local -a basic=(0 33 93 90 97 30 32 32 96 36)
+  COLOR_MODE="$1"
+  RESET=$'\033[0m' BOLD=$'\033[1m'
+  GRAY=$'\033[90m' GOLD=$'\033[33m' GREEN=$'\033[32m' CYAN=$'\033[36m'
+  for (( index=1; index<${#rgb[@]}; index++ )); do
+    case "$COLOR_MODE" in
+      truecolor)
+        printf -v code '\033[38;2;%sm' "${rgb[index]}"; PIXEL_FG[index]="$code"
+        printf -v code '\033[48;2;%sm' "${rgb[index]}"; PIXEL_BG[index]="$code" ;;
+      256)
+        printf -v code '\033[38;5;%sm' "${indexed[index]}"; PIXEL_FG[index]="$code"
+        printf -v code '\033[48;5;%sm' "${indexed[index]}"; PIXEL_BG[index]="$code" ;;
+      *)
+        printf -v code '\033[%sm' "${basic[index]}"; PIXEL_FG[index]="$code"
+        printf -v code '\033[%sm' "$(( ${basic[index]} + 10 ))"; PIXEL_BG[index]="$code" ;;
+    esac
+  done
+  GOLD="${PIXEL_FG[1]}" GREEN="${PIXEL_FG[6]}" CYAN="${PIXEL_FG[8]}"
+}
+
 init_style() {
+  local locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
   UI_WIDTH="${COLUMNS:-80}"
   if [[ -z "${COLUMNS:-}" && -t 1 ]] && command -v tput >/dev/null 2>&1; then
     UI_WIDTH="$(tput cols 2>/dev/null || printf '80')"
   fi
   [[ "$UI_WIDTH" =~ ^[0-9]{1,3}$ ]] || UI_WIDTH=80
   UI_WIDTH=$((10#$UI_WIDTH))
+  (( UI_WIDTH > 0 )) || UI_WIDTH=1
+  case "$locale" in *UTF-8*|*utf-8*|*UTF8*|*utf8*) UI_UTF8=true ;; esac
   if [[ -t 1 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR+x}" && "$NO_ANSI" == false && "$PLAIN" == false ]]; then
-    RESET=$'\033[0m' BOLD=$'\033[1m' DIM=$'\033[2m'
-    CYAN=$'\033[36m' MAGENTA=$'\033[35m' GREEN=$'\033[32m'
-    BADGE=$'\033[44;97m'
-    LOGO_COLORS=("$CYAN" "$CYAN" "$CYAN" "$MAGENTA" "$MAGENTA" "$MAGENTA")
     case "${COLORTERM:-}:${TERM:-}" in
-      *truecolor*|*24bit*|*direct*)
-        CYAN=$'\033[38;2;77;220;240m' MAGENTA=$'\033[38;2;174;150;255m'
-        GREEN=$'\033[38;2;110;231;183m' BADGE=$'\033[48;2;77;220;240;38;2;10;18;32m'
-        LOGO_COLORS=($'\033[38;2;77;220;240m' $'\033[38;2;91;202;249m'
-          $'\033[38;2;112;181;255m' $'\033[38;2;135;163;255m'
-          $'\033[38;2;159;148;255m' $'\033[38;2;182;139;250m') ;;
-      *256color*)
-        CYAN=$'\033[38;5;80m' MAGENTA=$'\033[38;5;141m'
-        GREEN=$'\033[38;5;84m' BADGE=$'\033[48;5;80;38;5;17m'
-        LOGO_COLORS=($'\033[38;5;80m' $'\033[38;5;81m' $'\033[38;5;75m'
-          $'\033[38;5;111m' $'\033[38;5;141m' $'\033[38;5;177m') ;;
+      *truecolor*|*24bit*|*direct*) set_palette truecolor ;;
+      *256color*) set_palette 256 ;;
+      *) set_palette basic ;;
     esac
   fi
 }
+
 fail() {
   if [[ -t 2 && "${TERM:-dumb}" != dumb && -z "${NO_COLOR+x}" && "$NO_ANSI" == false && "$PLAIN" == false ]]; then
-    printf '\033[31;1m  [error]\033[0m %s\n' "$*" >&2
+    printf '\033[31;1m  error\033[0m  %s\n' "$*" >&2
   else
     printf 'zshcfg: %s\n' "$*" >&2
   fi
   exit 1
 }
 
-rule() {
-  local width="$UI_WIDTH" line
-  (( width > 76 )) && width=76
-  (( width < 20 )) && width=20
-  printf -v line '%*s' "$width" ''
-  printf '%s%s%s\n' "$DIM" "${line// /-}" "$RESET"
+center_line() {
+  local text="$1" style="${2:-}" width="${3:-${#1}}" padding=0
+  (( UI_WIDTH > width )) && padding=$(( (UI_WIDTH - width) / 2 ))
+  printf '%*s%s%s%s\n' "$padding" '' "$style" "$text" "$RESET"
+}
+
+loki_art() {
+  local row col top bottom prefix fg bg glyph last_fg last_bg padding
+  padding=$(( (UI_WIDTH - 28) / 2 ))
+  for (( row=0; row<${#LOKI_PIXELS[@]}; row+=2 )); do
+    printf '%*s' "$padding" ''
+    last_fg='' last_bg=''
+    for (( col=0; col<28; col++ )); do
+      top="${LOKI_PIXELS[row]:col:1}" bottom="${LOKI_PIXELS[row+1]:col:1}"
+      fg='' bg=$'\033[49m' glyph=' '
+      if [[ "$top" != . ]]; then
+        prefix="${PALETTE_SYMBOLS%%"$top"*}"; fg="${PIXEL_FG[${#prefix}]}"; glyph='▀'
+        if [[ "$bottom" != . ]]; then
+          prefix="${PALETTE_SYMBOLS%%"$bottom"*}"; bg="${PIXEL_BG[${#prefix}]}"
+        fi
+      elif [[ "$bottom" != . ]]; then
+        prefix="${PALETTE_SYMBOLS%%"$bottom"*}"; fg="${PIXEL_FG[${#prefix}]}"; glyph='▄'
+      fi
+      if [[ "$fg" != "$last_fg" ]]; then printf '%s' "$fg"; last_fg="$fg"; fi
+      if [[ "$bg" != "$last_bg" ]]; then printf '%s' "$bg"; last_bg="$bg"; fi
+      printf '%s' "$glyph"
+    done
+    printf '%s\n' "$RESET"
+  done
 }
 
 banner() {
-  local line index=0
-  printf '\n'
-  printf '  %s%s LOKI / SHELL ENVIRONMENT %s\n\n' "$BOLD" "$BADGE" "$RESET"
-  if [[ "$PLAIN" == false && ( -t 1 || "$PREVIEW" == true ) ]] && (( UI_WIDTH >= 60 )); then
-    while IFS= read -r line; do
-      printf '%s%s%s%s\n' "$BOLD" "${LOGO_COLORS[index]:-}" "$line" "$RESET"
-      index=$((index + 1))
-    done <<'LOGO'
-   ______ _____ _    _  _____ ______ _____
-  |___  // ____| |  | |/ ____|  ____/ ____|
-     / /| (___ | |__| | |    | |__ | |  __
-    / /  \___ \|  __  | |    |  __|| | |_ |
-   / /__ ____) | |  | | |____| |   | |__| |
-  /_____|_____/|_|  |_|\_____|_|    \_____|
-LOGO
-  else
-    printf '  %s%sZSHCFG%s / SHELL SETUP\n' "$BOLD" "$CYAN" "$RESET"
+  local line
+  # Redirection, dumb terminals, plain mode and NO_COLOR get a small text header.
+  if [[ "$PLAIN" == true || "$COLOR_MODE" == none ]]; then
+    if [[ -t 1 && "$PLAIN" == false ]]; then center_line 'SHCFG'; else printf 'SHCFG\n'; fi
+    return
   fi
-  printf '\n  %s%sMY SHELL. MY SHORTCUTS. EVERY MACHINE.%s\n' "$BOLD" "$MAGENTA" "$RESET"
-  printf '  %sZsh + Powerlevel10k / Nano / modern CLI tools%s\n\n' "$DIM" "$RESET"
-  rule
+  printf '\n'
+  if [[ "$UI_UTF8" == true ]] && (( UI_WIDTH >= 33 )); then
+    while IFS= read -r line; do center_line "$line" "$GOLD$BOLD" 33; done <<'TITLE'
+█████  █   █  █████  █████  █████
+█      █   █  █      █      █
+█████  █████  █      ████   █  ██
+    █  █   █  █      █      █   █
+█████  █   █  █████  █      █████
+TITLE
+  else
+    center_line 'SHCFG' "$GOLD$BOLD"
+  fi
+  if [[ "$UI_UTF8" == true ]] && (( UI_WIDTH >= 28 )); then
+    printf '\n'
+    loki_art
+  fi
+  printf '\n'
+  if (( UI_WIDTH >= 32 )); then center_line 'Zsh environment setup' "$GRAY"; fi
+  printf '\n'
 }
 
-detail() { printf '  %s%-13s%s %s\n' "$DIM" "$1" "$RESET" "$2"; }
-section() { printf '\n  %s%s%s%s\n\n' "$BOLD" "$MAGENTA" "$1" "$RESET"; }
-progress() {
-  local completed="$1" index
-  printf '  %s[' "$DIM"
-  for (( index=0; index<4; index++ )); do
-    if (( index < completed )); then
-      printf '%s====' "$GREEN"
-    else
-      printf '%s....' "$DIM"
-    fi
-  done
-  printf '%s]%s  %s/4 stages complete\n' "$DIM" "$RESET" "$completed"
+detail() { printf '  %s%-10s%s %s\n' "$GRAY" "$1" "$RESET" "$2"; }
+stage_line() {
+  local symbol="$1" style="$2" label="$CURRENT_STAGE" limit=$(( UI_WIDTH - 6 ))
+  (( limit > 0 )) || limit=1
+  if [[ "$COLOR_MODE" != none ]]; then
+    printf '\r\033[2K  %s%s%s  %.*s' "$style" "$symbol" "$RESET" "$limit" "$label" >&3
+  else
+    printf '  %s  %s' "$symbol" "$label" >&3
+  fi
 }
+
+spinner_loop() {
+  local frame=0 frames='|/-\'
+  while :; do
+    stage_line "${frames:frame:1}" "$CYAN"
+    sleep 0.12
+    frame=$(( (frame + 1) % 4 ))
+  done
+}
+
+pause_spinner() {
+  if [[ -n "$SPINNER_PID" ]]; then
+    kill "$SPINNER_PID" 2>/dev/null || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=''
+    printf '\r\033[2K' >&3
+  fi
+}
+
+resume_spinner() {
+  if [[ "$COLOR_MODE" != none && "$CURRENT_STEP" != 0 ]]; then
+    spinner_loop &
+    SPINNER_PID=$!
+  fi
+}
+
 step() {
-  CURRENT_STAGE="$2"
-  printf '\n  %s%s[%02d/04]%s %s%s%s\n' "$BOLD" "$CYAN" "$1" "$RESET" "$BOLD" "$2" "$RESET"
-  progress "$(( $1 - 1 ))"
-  rule
+  CURRENT_STEP="$1" CURRENT_STAGE="$2"
+  resume_spinner
+}
+
+complete_step() {
+  pause_spinner
+  stage_line '*' "$GREEN"
+  printf '\n' >&3
+  CURRENT_STEP=0
 }
 finish() {
-  printf '\n'
-  rule
-  printf '  %s%s[ready] %s%s\n' "$BOLD" "$GREEN" "${1:-My shell environment is ready.}" "$RESET"
-  if [[ "$PREVIEW" != true ]]; then progress 4; fi
-  section 'MY CONFIGURATION'
-  detail 'MODULES' "$CONFIG_HOME/.zsh_config/"
-  detail 'PROMPT' "$CONFIG_HOME/.p10k.zsh"
-  detail 'NANO' "$CONFIG_HOME/.nanorc"
-  detail 'SOURCE' "$REPO"
-  info 'My installed files are links; editing them updates my checkout directly.'
-  section 'MY EDIT / RELOAD / SYNC WORKFLOW'
-  detail '01 / EDIT' "nano \"$CONFIG_HOME/.zsh_config/aliases.zsh\""
-  detail '02 / RELOAD' 'exec zsh'
-  detail '03 / PUBLISH' 'shcfgpush'
-  detail 'OTHER PCS' 'shcfgpull && exec zsh'
-  detail 'CHECK' 'shcfgcheck'
-  section 'MY MACHINE-LOCAL SETTINGS'
-  detail 'PRIVATE' "nano \"$CONFIG_HOME/.zsh_config/local.zsh\""
-  info 'My local.zsh stays on this machine and is excluded from publishing.'
-  printf '\n  %sFONT%s  I select a Powerlevel10k-compatible icon font in my terminal settings.\n' "$CYAN" "$RESET"
-  printf '  %sTOOLS%s nano: line numbers / cat: bat / ls: eza (when available)\n' "$CYAN" "$RESET"
-  rule
+  printf '\n  %s%s%s\n' "$GREEN" "${1:-Configuration ready.}" "$RESET"
+  detail 'edit' "nano \"$CONFIG_HOME/.zsh_config/aliases.zsh\""
+  detail 'reload' 'exec zsh'
+  detail 'publish' 'shcfgpush'
+  detail 'pull' 'shcfgpull'
+  detail 'commands' 'shcfghelp'
+  if [[ -n "$LOG_FILE" ]]; then detail 'log' "$LOG_FILE"; fi
   printf '\n'
 }
 
@@ -147,15 +234,25 @@ STAMP="$(date +%Y-%m-%d_%H-%M-%S)-$$"
 declare -a INSTALLED=() BACKUPS=()
 ACTIVATING=false
 
-info() { printf '  %s[info]%s %s\n' "$CYAN" "$RESET" "$*"; }
+info() { printf '  %s\n' "$*"; }
 confirm() {
   local answer='n'
-  printf '\n  %s%s[?]%s %s %s[y/N]%s ' "$BOLD" "$MAGENTA" "$RESET" "$1" "$DIM" "$RESET"
+  pause_spinner
+  printf '\n  %s?%s %s [y/N] ' "$CYAN" "$RESET" "$1"
   read -r answer || true
+  printf '\n'
   [[ "$answer" == [yY] ]]
 }
 as_admin() {
-  if (( EUID == 0 )); then "$@"; else sudo "$@"; fi
+  if (( EUID == 0 )); then
+    "$@"
+  else
+    # Authentication stays in the foreground, outside the captured stage output.
+    pause_spinner
+    sudo -v <&4 >&3 2>&5
+    resume_spinner
+    sudo -n "$@"
+  fi
 }
 as_user() {
   # Git, downloads, backups and links belong to the installing user, not root.
@@ -189,21 +286,18 @@ done
 init_style
 
 if [[ "$PREVIEW" == true ]]; then
+  exec 3>&1
+  trap 'pause_spinner; exit 130' INT
+  trap 'pause_spinner; exit 143' TERM
   banner
-  info 'INTERFACE PREVIEW ONLY. No commands are installed and no files are changed.'
-  detail 'MY ACCOUNT' "$INSTALL_USER"
-  detail 'MY HOME' "$CONFIG_HOME"
-  step 1 'Prepare my tools and shell plugins'
-  info 'Zsh, Git, curl, Nano, fzf, ripgrep, bat, eza, Python + venv'
-  info 'Oh My Zsh, Powerlevel10k, autosuggestions, syntax highlighting'
-  step 2 'Prepare and validate my configuration'
-  detail 'CHECKOUT' "$REPO"
-  step 3 'Back up and link my dotfiles'
-  info 'Dated backups; private local.zsh stays on this machine.'
-  step 4 'Choose my default shell'
-  info 'The real installation asks before changing my login shell.'
-  finish 'Completion screen preview (no installation performed).'
-  info 'Preview complete. Run bash install.sh to install.'
+  info 'Preview only; no files changed.'
+  preview_stage=0
+  for label in 'Tools and plugins' 'Configuration' 'Dotfiles' 'Login shell'; do
+    preview_stage=$((preview_stage + 1))
+    step "$preview_stage" "$label"
+    if [[ "$COLOR_MODE" != none ]]; then sleep 0.6; fi
+    complete_step
+  done
   printf '\n'
   exit 0
 fi
@@ -211,8 +305,13 @@ fi
 # Config activation is reversible. Dependencies and the checkout are kept on failure.
 rollback() {
   local result=$? i
+  pause_spinner
+  if (( result != 0 && CURRENT_STEP != 0 )); then
+    stage_line '!' "$GOLD"
+    printf '\n' >&3
+  fi
   if [[ "$ACTIVATING" == true ]]; then
-    printf 'zshcfg: Activation failed; restoring replaced configuration files.\n' >&2
+    printf 'zshcfg: Activation failed; restoring replaced configuration files.\n' >&5
     set +e
     for (( i=${#INSTALLED[@]}-1; i>=0; i-- )); do
       as_user rm -f -- "${INSTALLED[i]}"
@@ -220,11 +319,18 @@ rollback() {
     done
   fi
   if (( result != 0 )); then
-    printf 'zshcfg: Installation stopped during: %s. Fix the error above, then rerun.\n' "$CURRENT_STAGE" >&2
+    if [[ -n "$LOG_FILE" && -s "$LOG_FILE" ]]; then
+      printf '\n' >&5
+      tail -n 15 -- "$LOG_FILE" >&5 || true
+      printf '\nFull log: %s\n' "$LOG_FILE" >&5
+    fi
+    printf 'zshcfg: Installation stopped during: %s. Fix the error above, then rerun.\n' "$CURRENT_STAGE" >&5
   fi
   exit "$result"
 }
 trap rollback EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 install_packages() {
   local tool manager package
@@ -303,7 +409,7 @@ prepare_repo() {
   elif [[ -f "$SCRIPT_DIR/.zshrc" && -f "$SCRIPT_DIR/bin/zshcfg" && -d "$SCRIPT_DIR/.git" ]]; then
     local source_status
     source_status="$(as_user git -C "$SCRIPT_DIR" status --porcelain)" || fail 'The installing user must be able to read the source Git checkout.'
-    [[ -z "$source_status" ]] || fail 'My checkout has uncommitted changes. I need to commit them before installing.'
+    [[ -z "$source_status" ]] || fail 'The source checkout has uncommitted changes. Commit them before installing.'
     as_user git clone --no-hardlinks "$SCRIPT_DIR" "$REPO"
     # A local clone should continue syncing with the original online remote.
     local source_remote source_branch
@@ -374,42 +480,58 @@ activate_config() {
 }
 
 offer_default_shell() {
+  CURRENT_STAGE='Login shell (skipped)'
   [[ "$NO_CHSH" != true ]] || return 0
   # Alternate-home installations are for fixtures/staging, not account changes.
   [[ "$CONFIG_HOME" == "$INSTALL_HOME" ]] || return 0
+  CURRENT_STAGE='Login shell (unchanged)'
   local zsh_path
   zsh_path="$(command -v zsh)"
   [[ "$INSTALL_SHELL" != "$zsh_path" ]] || return 0
-  if confirm 'Make Zsh my default login shell?'; then
+  if confirm 'Set Zsh as the default login shell?'; then
     if ! grep -qxF "$zsh_path" /etc/shells; then
       info "Zsh must be listed in /etc/shells first: $zsh_path"
       return 0
     fi
-    as_user chsh -s "$zsh_path" || info "Could not change my login shell. I can run: chsh -s $zsh_path"
+    if as_user chsh -s "$zsh_path"; then
+      CURRENT_STAGE='Login shell'
+    else
+      info "Login shell unchanged. Run: chsh -s $zsh_path"
+    fi
   fi
 }
 
+exec 3>&1 4<&0 5>&2
 banner
-detail 'MY ACCOUNT' "$INSTALL_USER"
-detail 'MY HOME' "$CONFIG_HOME"
-detail 'MY CHECKOUT' "$REPO"
+detail 'home' "$CONFIG_HOME"
 printf '\n'
-info 'My existing config files get dated backups. My private overrides stay local.'
+info 'Existing files get dated backups; local.zsh stays private.'
 if [[ "$ASSUME_YES" != true ]]; then
-  confirm 'Install my tools and link my configuration?' || { info 'Installation cancelled.'; exit 0; }
+  confirm 'Install tools and link the configuration?' || { info 'Installation cancelled.'; exit 0; }
 fi
-step 1 'Prepare my tools and shell plugins'
-if [[ "$SKIP_DEPS" != true ]]; then
-  install_dependencies
-else
-  info 'Dependency installation skipped; I am using my existing tools.'
-fi
-command -v git >/dev/null 2>&1 || fail 'Git is required.'
-command -v zsh >/dev/null 2>&1 || fail 'Zsh is required.'
-step 2 'Prepare and validate my configuration'
-prepare_repo
-step 3 'Back up and link my dotfiles'
-activate_config
-step 4 'Choose my default shell'
+as_user mkdir -p -- "$CONFIG_HOME/.local/state/zshcfg"
+LOG_FILE="$CONFIG_HOME/.local/state/zshcfg/install-$STAMP.log"
+as_user bash -c 'umask 077; set -o noclobber; : > "$1"' install-log "$LOG_FILE"
+printf '\n'
+step 1 'Tools and plugins'
+{
+  if [[ "$SKIP_DEPS" != true ]]; then
+    install_dependencies
+  else
+    info 'Dependency installation skipped; using existing tools.'
+    CURRENT_STAGE='Tools and plugins (existing)'
+  fi
+  command -v git >/dev/null 2>&1 || fail 'Git is required.'
+  command -v zsh >/dev/null 2>&1 || fail 'Zsh is required.'
+} >> "$LOG_FILE" 2>&1
+complete_step
+step 2 'Configuration'
+prepare_repo >> "$LOG_FILE" 2>&1
+complete_step
+step 3 'Dotfiles'
+activate_config >> "$LOG_FILE" 2>&1
+complete_step
+step 4 'Login shell'
 offer_default_shell
+complete_step
 finish

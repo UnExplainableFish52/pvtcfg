@@ -1,0 +1,111 @@
+SHCFG command reference
+
+CONFIGURATION
+  shcfg / zshcfg             Configuration CLI; both accept the commands below
+  shcfghelp                  This reference (zshcfg commands)
+  zshcfg help                Configuration CLI usage
+  zshcfg v / V / version     Version and local edit status
+  shcfgcheck / chkv          Fetch and compare with upstream; offer a clean pull
+  shcfgpull                  Pull configuration updates (fast-forward only)
+  shcfgpush                  Commit managed changes and push; asks for a message
+  shcfgpush -m "MESSAGE"      Supply the message directly
+  zshcfg push force          Force-with-lease after zshcfg check; saves backups
+  zshcfg publish             Same as zshcfg push
+  exec zsh                   Reload the shell after editing or pulling
+  shell_config              Enter ~/.zsh_config (also cdshc / cdshcfg)
+  cd shell_config            Named-directory shortcut; cd ~shell_config is explicit
+  nano ~/.zsh_config/aliases.zsh    Edit shortcuts
+  nano ~/.zsh_config/functions.zsh  Edit helper functions
+  nano ~/.zsh_config/local.zsh      Edit private settings; never published
+  p10k configure             Powerlevel10k prompt setup (provided by the theme)
+
+NAVIGATION AND FILES
+  .. / ...                   Move up one / two directories
+  doc                        ~/Documents
+  cdpg / cdtemp              ~/Documents/playground / playground/temp (no clearing)
+  cdsh                       ~/Documents/bash/shell
+  c                          Clear the terminal
+  tp                         Destination menu
+  tp c / tp p                Documents/codes
+  tp t                       Documents/codes/temp; asks before emptying contents
+  tp i / tp d / tp n          Shell config / Downloads / Documents/notes
+  tp b / tp s / tp h          ~/.local/bin / ~/.ssh / home
+  tp q                       Quit without changing directory
+  tp TEXT                    Jump to the best substring match among known folders
+  tp -s TEXT                 List matching destinations
+  tp -f                      Pick a destination with fzf
+  TSH / tsh                  Clear and enter ~/Documents/shell/temp_session
+                             Every call deletes its previous contents, even hidden files
+  check_recent_files DIR     List files newest first (GNU find)
+  ls / ll / lla              eza when available; detailed and hidden-file listings
+  cat FILE                   bat/batcat with line numbers and no pager, when available
+  bat                        batcat alias when only batcat is installed
+  grep                       ripgrep when available (uses rg syntax)
+  rm                         rm -I --preserve-root; confirmation for bulk deletion
+  cp / mv                    Ask before overwriting (-i)
+  command TOOL               Bypass an alias (command ls, command cat, command grep)
+  install PACKAGE            sudo apt update && sudo apt install PACKAGE
+  ping HOST                  Send four probes (-c 4)
+
+PYTHON AND UTILITIES
+  py3                        python3
+  mkvenv NAME                Create a venv folder, enter it, activate bin/activate
+  deactivate                 Leave an active Python venv (provided by Python)
+  rand / random / rint        Integer from 1 to 100
+  rand MAX                   Integer from 1 to MAX
+  rand MIN MAX               Integer between bounds; reversed bounds also work
+
+GIT
+  g                          git
+  gs                         git status -sb
+  gl / gll                   Graph of all branches / log with file statistics
+  glnm                       One-line log without merge commits
+  gd / gds                   Working-tree diff / staged diff
+  ga / gaa                   git add / git add -A
+  gc / gcm "MESSAGE"         git commit / git commit -m "MESSAGE"
+  gca / gcan                 Amend commit / amend keeping the existing message
+  gb / gba                   List local / all branches
+  gco / gcb NAME              git checkout / git checkout -b NAME
+  gsw / gsc NAME              git switch / git switch -c NAME
+  gf                         Fetch all remotes and prune removed references
+  gpl                        git pull --rebase (ordinary project Git)
+  gps / gpsu                 git push / git push -u origin HEAD
+  gstash "MESSAGE"           Stash including untracked files, with a message
+  gst                        List stashes
+  gsta / gstp [STASH]         Apply / pop a stash
+  gstd [STASH] / gstc         Drop one stash / clear all stashes
+  grs FILE                   Restore file contents (discards unstaged edits)
+  grss FILE                  Unstage a file
+  grb / grbi                 Rebase / interactive rebase
+  gmg / gmc                  Merge / continue merge
+  gab / gmb                  Abort rebase / abort merge
+  gconf                      List files with merge conflicts
+  gaddconf                   Stage conflicted files; use git add for names with spaces
+
+KEYBOARD
+  Up / Down                  Search history using the current input prefix
+  Ctrl+R                     fzf history picker
+  Ctrl+T / Alt+C             File insertion / directory picker, if distro fzf scripts exist
+  Ctrl+Left / Ctrl+Right     Move backward / forward one word
+  Ctrl+Delete                Delete the next word
+  Ctrl+A / Ctrl+E            Beginning / end of line (Emacs bindings)
+
+FILES AND DEFAULTS
+  ~/.zsh_config/             env, options, aliases, functions, keybinds modules
+  ~/.zsh_config/local.zsh    Machine-only overrides, loaded last
+  ~/.p10k.zsh / ~/.nanorc    Prompt / Nano settings
+  ~/.zshrc                   Startup and plugin loading
+  ~/.local/share/zshcfg/repo Permanent tracked source; installed files link here
+  ~/.local/state/zshcfg/     Installer logs and version/remote-check state
+  EDITOR / VISUAL            nano; save Ctrl+O, Enter; exit Ctrl+X
+  History                    50,000 entries; shared between shells
+  Plugins                    git, zsh-autosuggestions, zsh-syntax-highlighting
+
+DISCOVERY
+  alias                      Show active aliases, including plugins/local overrides
+  functions NAME             Print a function definition (for example functions tp)
+  functions                  Print all loaded function definitions
+  bindkey                    Show active keyboard bindings
+  Helpers beginning with _tp_ and _rint_core, path_add and fzf-history-widget are
+  implementation helpers. Use tp, rand and the keyboard bindings directly.
+  Oh My Zsh can add more commands; this reference covers the repository's shortcuts.

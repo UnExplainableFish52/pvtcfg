@@ -109,7 +109,8 @@ class Workflow(unittest.TestCase):
             item = fakebin / name
             item.write_text('#!/bin/bash\n' + text)
             item.chmod(0o755)
-        executable('sudo', 'exec "$@"\n')
+        executable('sudo', '[[ "$1" != -v ]] || exit 0\n'
+                   '[[ "$1" != -n ]] || shift\nexec "$@"\n')
         executable('python3', '[[ -f "$ZSHCFG_HOME/venv-ready" ]]\n')
         executable('apt-get', '''
 printf '%s\\n' "$*" >> "$ZSHCFG_HOME/package-log"

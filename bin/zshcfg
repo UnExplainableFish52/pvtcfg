@@ -24,10 +24,12 @@ Usage:
   zshcfg push force          Force-with-lease using the last checked remote
   zshcfg publish force       Same as push force
   zshcfg help                Show this help
+  zshcfg commands            List shell shortcuts, functions and key bindings
 
 chkv is also a shell alias for zshcfg check.
 shcfgpush is a shell shortcut for zshcfg push (accepts -m MESSAGE).
 shcfgpull and shcfgcheck run zshcfg pull and zshcfg check.
+shcfg is short for zshcfg; shcfghelp opens the full shell command reference.
 The word force applies only to push/publish. Git's original errors are retained.
 HELP
 }
@@ -233,5 +235,8 @@ case "$action" in
   help)
     (( $# <= 1 )) || fail 'Usage: zshcfg help'
     usage ;;
+  commands)
+    (( $# == 1 )) || fail 'Usage: zshcfg commands'
+    command cat -- "$REPO/bin/commands.txt" ;;
   *) usage >&2; exit 2 ;;
 esac

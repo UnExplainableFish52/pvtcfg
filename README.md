@@ -1,4 +1,4 @@
-# ZshCFG — Loki's shell configuration
+# SHCFG — Loki's shell configuration
 
 A modular Zsh setup with a small, readable Git wrapper. Nano is the default editor.
 
@@ -9,31 +9,38 @@ git clone https://github.com/UnExplainableFish52/pvtcfg.git
 bash pvtcfg/install.sh
 ```
 
-I can run the installer by its path from any working directory, or download
-just the installer:
+Run the installer by its path from any working directory, or download it alone:
 
 ```sh
 curl -fL https://raw.githubusercontent.com/UnExplainableFish52/pvtcfg/main/install.sh -o install.sh
 bash install.sh
 ```
 
-The installer uses first-person copy: **my shell, my shortcuts, every machine**.
-Its title fades from cyan to violet in terminals with truecolor or 256-color
-support, with standard ANSI colors as a fallback. Numbered phases include a
-progress bar counting completed stages. The completion guide lists my config
-locations and edit/reload/sync commands. It uses my terminal's existing font and
-needs no extra display tools. Package-manager and Git output stays visible while
-work runs; failures identify the active stage.
-Piped output uses a compact title and no ANSI colors. To preview the interface
-without installing anything:
+The installer opens with a large, centered **SHCFG** title and a small Loki:
+gold horns, green cape, and a blue staff, drawn with hand-placed Unicode half-blocks.
+Underneath: *Zsh environment setup.* Then straight into installation.
+Colors support truecolor, 256-color and basic ANSI terminals. Empty pixels use
+the terminal's own background, so the artwork works on dark and light themes.
+Installation uses a compact live checklist: a rotating `| / - \\` marks the active
+step, and `*` marks a completed step. No extra display tools are required.
+
+To preview the welcome and checklist without changing any files:
 
 ```sh
 bash install.sh --preview
 ```
 
-Use `--no-color` (or set `NO_COLOR`) to disable colors, or `--plain` for a compact,
-unstyled interface. The large title automatically collapses in narrow terminals.
-The preview shows the stages without running them.
+The title stays centered as the terminal changes width. Below 33 columns it
+becomes a compact text title; below 28 columns the character is omitted. Without
+a UTF-8 locale, the welcome uses ASCII text. `--no-color`, `NO_COLOR`, `TERM=dumb`,
+and redirected output skip the artwork and ANSI colors. `--plain` uses a minimal
+text header. Regular `zshcfg` commands and shell startup stay free of artwork.
+Plain and redirected output use a static checklist without cursor controls.
+Routine package-manager, Git and file-link output goes to a private log under
+`~/.local/state/zshcfg/install-*.log`. A failure marks the active step with `!`,
+shows the last 15 log lines, and prints the full log path. Password and login-shell
+prompts stay visible. The completion screen lists edit, reload, publish, pull,
+command-reference and log locations.
 
 The installer asks before proceeding and before changing the default login shell.
 Both `bash pvtcfg/install.sh` and `sudo bash pvtcfg/install.sh` are supported.
@@ -85,13 +92,13 @@ explicit `zshcfg pull`. Installation from a Git clone requires committed files s
 the permanent clone contains the version you intended. A standalone installer or
 ZIP without Git history obtains the configured remote branch instead.
 
-## How I edit my configuration
+## Editing the configuration
 
-After installation, my permanent source checkout lives at
-`~/.local/share/zshcfg/repo`. My everyday config paths link into that checkout,
-so I can edit the installed files directly:
+After installation, the permanent source checkout lives at
+`~/.local/share/zshcfg/repo`. Installed config paths link into that checkout,
+so edits to the installed files update their tracked sources directly:
 
-| What I want to change | File I edit | Source inside the checkout |
+| Setting | Installed file | Source inside the checkout |
 | --- | --- | --- |
 | Command shortcuts | `~/.zsh_config/aliases.zsh` | `zsh/aliases.zsh` |
 | Navigation and helper functions | `~/.zsh_config/functions.zsh` | `zsh/functions.zsh` |
@@ -103,32 +110,32 @@ so I can edit the installed files directly:
 | Startup and plugin loading | `~/.zshrc` | `.zshrc` |
 | Private or machine-specific settings | `~/.zsh_config/local.zsh` | Local file, excluded from Git |
 
-For example, I edit my aliases:
+For example, edit the aliases:
 
 ```sh
 nano ~/.zsh_config/aliases.zsh
 ```
 
-In Nano, I save with **Ctrl+O**, press **Enter** to confirm the filename, then
-exit with **Ctrl+X**. I reload my shell and publish the change:
+In Nano, save with **Ctrl+O**, press **Enter** to confirm the filename, then
+exit with **Ctrl+X**. Reload the shell and publish the change:
 
 ```sh
 exec zsh
 shcfgpush
 ```
 
-`shcfgpush` asks for my commit message, commits the managed config changes, and
-pushes them to the remote. My Git author identity and GitHub authentication need
-to be configured on this machine. On another installed machine, I download the
+`shcfgpush` asks for a commit message, commits the managed config changes, and
+pushes them to the remote. Git author identity and GitHub authentication need
+to be configured on the machine. On another installed machine, download the
 change and reload:
 
 ```sh
 shcfgpull && exec zsh
 ```
 
-I keep the permanent checkout in place because the installed files link to it.
-I edit that checkout through these links, rather than a separate installer clone.
-For secrets, local paths, or settings that should stay on one machine, I use
+Keep the permanent checkout in place because the installed files link to it.
+Edit that checkout through these links. For secrets, local paths, or settings
+that should stay on one machine, use
 `nano ~/.zsh_config/local.zsh`; that file loads last and is never published by
 `shcfgpush`.
 
@@ -154,6 +161,8 @@ when you specifically need their original behavior.
 
 | Command | Action |
 | --- | --- |
+| `shcfg` | Short form of `zshcfg`; accepts the same subcommands |
+| `shcfghelp`, `shcfg commands`, `zshcfg commands` | Full shell command reference, including aliases, functions and key bindings |
 | `zshcfg v`, `zshcfg V`, `zshcfg version` | Show version and local modification status |
 | `shcfgcheck`, `chkv`, `zshcfg chkv`, `zshcfg check` | Fetch upstream information and report commit counts and remote version |
 | `shcfgpull`, `zshcfg pull` | Update a clean checkout with a fast-forward; never merge/rebase/discard edits |
@@ -181,7 +190,7 @@ For example, after installation:
 ```sh
 nano ~/.zsh_config/aliases.zsh
 shcfgpush
-# Commit message (leave blank to cancel): Add my project navigation alias
+# Commit message (leave blank to cancel): Add project navigation alias
 ```
 
 The linked files already belong to the permanent checkout, so the shortcut works
@@ -247,8 +256,11 @@ invocation; this does not clear history, provide a separate shell, or securely
 erase files. The older `tp t` remains separate and asks before clearing its folder.
 `tp` uses the XDG Documents location where configured; TSH uses literal Documents.
 
-Existing general Git aliases are preserved in `zsh/aliases.zsh`: status/log/diff,
-stage/commit, branches, fetch/pull/push, stash, restore, rebase and merge helpers.
+Run `shcfghelp` for the complete [command reference](bin/commands.txt), including
+every repository-defined alias and public helper. Run `alias`, `functions NAME`,
+and `bindkey` to inspect the active shell, including plugin and local additions.
+General Git aliases cover status/log/diff, stage/commit, branches, fetch/pull/push,
+stash, restore, rebase and merge helpers.
 The existing `gaddconf` uses whitespace splitting, so stage conflict filenames
 with spaces manually. Other retained settings include 50,000-entry shared history,
 prefix search with Up/Down, Emacs keys, and the existing Powerlevel10k prompt.
@@ -259,6 +271,7 @@ prefix search with Up/Down, Emacs keys, and the existing Powerlevel10k prompt.
 python3 tests/test_navigation.py
 python3 tests/test_workflow.py
 python3 tests/test_publish.py
+python3 tests/test_installer_ui.py
 ```
 
 The navigation tests cover TSH reset boundaries and tp behavior. Workflow tests
@@ -274,6 +287,10 @@ The portable publish tests use real local Git remotes to check prompted messages
 cancellation, multi-file commits, private-file exclusion, rejected-push retries,
 second-machine pulls, and LF checkouts. Only Zsh syntax validation is stubbed in
 that portable suite; the Linux workflow suite exercises real Zsh.
+The installer UI tests check the welcome, palettes, width and locale fallbacks,
+preview/cancellation without changes, spinner lifecycle, captured output, error
+reporting and configuration activation with isolated homes. Portable activation
+tests stub Zsh syntax validation; real Zsh checks remain in the Linux workflow suite.
 
 Installer display options: `--preview` displays the interface without changes,
 `--no-color` disables ANSI styling, and `--plain` uses a compact, unstyled title.

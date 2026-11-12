@@ -44,7 +44,7 @@ class Publish(unittest.TestCase):
                         GIT_AUTHOR_NAME='Config test', GIT_AUTHOR_EMAIL='test@example.invalid',
                         GIT_COMMITTER_NAME='Config test', GIT_COMMITTER_EMAIL='test@example.invalid')
         for name in ('.zshrc', '.nanorc', '.p10k.zsh', 'VERSION', '.gitignore',
-                     '.gitattributes', 'install.sh', 'bin/zshcfg'):
+                     '.gitattributes', 'install.sh', 'bin/zshcfg', 'bin/commands.txt'):
             dest = self.repo / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, dest)
@@ -67,6 +67,15 @@ class Publish(unittest.TestCase):
 
     def edit(self, name, content):
         (self.repo / name).write_bytes(content.encode())
+
+    def test_command_reference_is_available_without_changing_configuration(self):
+        result = self.cli('commands')
+        for name in ('shcfghelp', 'shcfgpush', 'tp -f', 'TSH / tsh', 'mkvenv',
+                     'gaddconf', 'Ctrl+R', 'local.zsh'):
+            self.assertIn(name, result.stdout)
+        self.assertEqual(self.git(self.repo, 'status', '--porcelain'), '')
+        self.assertIn('zshcfg commands', self.cli('help').stdout)
+        self.cli('commands', 'unexpected', expected=1)
 
     def test_prompt_publishes_multiple_files_and_keeps_private_files_local(self):
         self.edit('zsh/aliases.zsh', "alias hello='echo hello'\n")

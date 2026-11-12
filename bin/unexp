@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Read-only lessons. Names are matched as data; nothing described here is executed.
+set -euo pipefail
+
+LESSONS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/unexp.txt"
+usage() {
+  printf 'Usage: unexp [NAME | --list | --help]\n'
+  printf 'Examples: unexp mkvenv, unexp gs, unexp tp\n'
+  printf 'In Zsh, unexp also shows the active alias or function definition.\n'
+  printf 'From the configuration CLI: shcfg unexp NAME\n'
+}
+
+(( $# <= 1 )) || { usage >&2; exit 1; }
+topic="${1:---list}"
+case "$topic" in
+  --help|-h) usage; exit 0 ;;
+  --list)
+    printf 'UNEXP / shortcut lessons\n\n'
+    while IFS= read -r line; do
+      [[ "$line" == '@@ '* ]] || continue
+      printf '  %s\n' "${line#@@ }"
+    done < "$LESSONS"
+    printf '\nType unexp NAME to reveal a shortcut.\n'
+    printf 'Any active alias or function can also be inspected in Zsh.\n'
+    exit 0 ;;
+esac
+
+found=false
+while IFS= read -r line || [[ -n "$line" ]]; do
+  if [[ "$line" == '@@ '* ]]; then
+    [[ "$found" != true ]] || exit 0
+    # Match whole literal names, including punctuation such as .. and ... .
+    read -r -a names <<< "${line#@@ }"
+    for name in "${names[@]}"; do
+      if [[ "$name" == "$topic" ]]; then
+        found=true
+        printf 'Reference lesson / %s\n' "$topic"
+        break
+      fi
+    done
+  elif [[ "$found" == true ]]; then
+    printf '%s\n' "$line"
+  fi
+done < "$LESSONS"
+
+if [[ "$found" != true ]]; then
+  printf 'No reference lesson for "%s". Use unexp --list for available lessons.\n' "$topic" >&2
+  exit 2
+fi

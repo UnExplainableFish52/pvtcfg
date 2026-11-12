@@ -163,6 +163,8 @@ when you specifically need their original behavior.
 | --- | --- |
 | `shcfg` | Short form of `zshcfg`; accepts the same subcommands |
 | `shcfghelp`, `shcfg commands`, `zshcfg commands` | Full shell command reference, including aliases, functions and key bindings |
+| `unexp`, `unexp NAME` | Browse learning topics or reveal an active shortcut and its underlying commands |
+| `shcfg unexp NAME` | Read a repository reference lesson through the configuration CLI |
 | `zshcfg v`, `zshcfg V`, `zshcfg version` | Show version and local modification status |
 | `shcfgcheck`, `chkv`, `zshcfg chkv`, `zshcfg check` | Fetch upstream information and report commit counts and remote version |
 | `shcfgpull`, `zshcfg pull` | Update a clean checkout with a fast-forward; never merge/rebase/discard edits |
@@ -232,6 +234,34 @@ Commit history, rather than the version label, determines ahead/behind/diverged.
 
 ## Existing personal shortcuts
 
+### Reveal and learn a shortcut
+
+`unexp` opens a small text menu in an interactive Zsh session. Enter a shortcut
+name to see its active alias expansion or function body, followed by a reference
+lesson where available. Enter a blank line to close the menu. With redirected
+input/output it lists topics and exits without waiting for input.
+
+```sh
+unexp mkvenv
+unexp gs
+unexp tp
+unexp --list
+```
+
+For example, `unexp mkvenv` shows the function and breaks the workflow down into
+`python3 -m venv .venv`, `cd .venv`, and `source bin/activate`. It explains `-m`,
+activation and `&&`, plus the alternative that keeps the current directory at the
+project root. `unexp gs` reveals `git status -sb` and explains `-s` and `-b`.
+
+Inspection reads definitions as text and never runs the requested shortcut.
+Machine-local and plugin aliases/functions can also be inspected; they may not
+have a reference lesson. Lessons describe repository defaults, while the active
+definition reflects the current shell, including overrides. `shcfg unexp NAME`
+reads only the reference lesson because an external CLI cannot inspect its
+parent shell's active aliases and functions. `unexp --help` shows usage.
+
+### Navigation and utilities
+
 | Command | Destination / action |
 | --- | --- |
 | `..`, `...` | One / two directories up |
@@ -272,6 +302,7 @@ python3 tests/test_navigation.py
 python3 tests/test_workflow.py
 python3 tests/test_publish.py
 python3 tests/test_installer_ui.py
+python3 tests/test_unexp.py
 ```
 
 The navigation tests cover TSH reset boundaries and tp behavior. Workflow tests
@@ -291,6 +322,9 @@ The installer UI tests check the welcome, palettes, width and locale fallbacks,
 preview/cancellation without changes, spinner lifecycle, captured output, error
 reporting and configuration activation with isolated homes. Portable activation
 tests stub Zsh syntax validation; real Zsh checks remain in the Linux workflow suite.
+The unexp tests cover lesson coverage, command explanations, CLI routing and literal
+topic handling. Live alias/function inspection checks run when Zsh is installed;
+otherwise those checks are reported as skipped.
 
 Installer display options: `--preview` displays the interface without changes,
 `--no-color` disables ANSI styling, and `--plain` uses a compact, unstyled title.

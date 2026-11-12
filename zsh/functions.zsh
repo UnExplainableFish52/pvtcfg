@@ -299,7 +299,70 @@ rand() {
 random() { rand "$@"; }
 rint()   { rand "$@"; }
 
-# python vevn configs 
+# Read active definitions as data. Never eval or invoke the requested shortcut.
+unexp() {
+  emulate -L zsh
+  local name="${1:-}" kind='' definition=''
+  if (( $# > 1 )); then
+    print -u2 -r -- 'Usage: unexp [NAME | --list | --help]'
+    return 1
+  fi
+  case "$name" in
+    --help|-h|--list) command zshcfg unexp "$name"; return $? ;;
+    '')
+      command zshcfg unexp --list || return $?
+      [[ -t 0 && -t 1 ]] || return 0
+      print
+      read -r 'name?Shortcut (Enter to close): ' || return 0
+      [[ -n "$name" ]] || return 0 ;;
+  esac
+
+  # The parameter module provides the live aliases/functions lookup tables.
+  zmodload zsh/parameter || return $?
+  if (( ${+aliases[$name]} )); then
+    kind='alias'
+    definition="${aliases[$name]}"
+  elif (( ${+functions[$name]} )); then
+    kind='function'
+    definition="${functions[$name]}"
+  fi
+
+  if [[ -n "$kind" ]]; then
+    print -r -- "UNEXP / $name ($kind)"
+    print
+    print -r -- 'Active definition:'
+    if [[ "$kind" == alias ]]; then
+      print -r -- "  $definition"
+      print -r -- '  Arguments supplied after the alias are appended to this expansion.'
+    else
+      print -r -- "$name() {"
+      print -r -- "$definition"
+      print -r -- '}'
+    fi
+    print
+    print -r -- 'Reference notes describe repository defaults; active definitions may differ.'
+    # Missing lessons are normal for machine-local or plugin-defined shortcuts.
+    command zshcfg unexp "$name" 2>/dev/null ||
+      print -r -- 'No reference lesson. The active definition above shows the implementation.'
+    return 0
+  fi
+
+  if [[ "$name" == -* ]]; then
+    print -u2 -r -- 'Usage: unexp [NAME | --list | --help]'
+    return 1
+  fi
+  if builtin whence -v -- "$name"; then
+    print
+    print -r -- 'This name has no active alias or function wrapper.'
+    command zshcfg unexp "$name" 2>/dev/null ||
+      print -r -- "For command documentation, use: man $name"
+    return 0
+  fi
+  print -u2 -r -- "unexp: No active command, alias or function named: $name"
+  return 1
+}
+
+# Python virtual environment helper.
 mkvenv(){
 python3 -m venv "$1" && cd "$1" && source bin/activate
 }

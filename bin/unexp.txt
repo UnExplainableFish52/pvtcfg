@@ -1,0 +1,237 @@
+@@ mkvenv
+Create, enter and activate a Python virtual environment.
+
+  Shortcut: mkvenv .venv
+  By hand:
+    python3 -m venv .venv
+    cd .venv
+    source bin/activate
+
+  python3 -m venv runs Python's venv module and creates an environment folder.
+  cd enters that folder. source loads activation into the current shell, changing
+  PATH so python and pip use the environment. && in the function runs each step
+  only if the previous one succeeded. deactivate leaves the environment.
+
+  A common project-root workflow keeps the current directory in the project:
+    python3 -m venv .venv
+    source .venv/bin/activate
+
+@@ py3
+Run Python 3.
+  py3 script.py -> python3 script.py
+
+@@ gs
+Inspect the current Git repository.
+  gs -> git status -sb
+  -s means short format; -b includes branch and tracking information.
+  This reports changes without staging or committing them.
+
+@@ g
+Invoke Git directly.
+  g status -> git status
+  Arguments after an alias are appended to its expansion.
+
+@@ gl gll glnm
+Review Git history.
+  gl   -> git log --oneline --graph --decorate --all
+  gll  -> git log --stat
+  glnm -> git log --no-merges --oneline --decorate
+  --oneline condenses commits, --graph draws ancestry, --decorate labels refs,
+  --all includes all refs, --stat summarizes files, --no-merges omits merge commits.
+
+@@ gd gds
+Review changes before committing.
+  gd  -> git diff           (unstaged changes)
+  gds -> git diff --staged  (staged changes)
+
+@@ ga gaa
+Stage changes for a commit.
+  ga FILE -> git add FILE
+  gaa     -> git add -A
+  -A includes additions, modifications and deletions throughout the repository.
+
+@@ gc gcm gca gcan
+Create or amend a Git commit.
+  gc               -> git commit
+  gcm "Message"    -> git commit -m "Message"
+  gca              -> git commit --amend
+  gcan             -> git commit --amend --no-edit
+  -m supplies a message. --amend replaces the latest commit; --no-edit keeps its
+  message. Amending changes commit history, including any newly staged changes.
+
+@@ gb gba
+List Git branches.
+  gb  -> git branch
+  gba -> git branch -a
+  -a includes remote-tracking branches.
+
+@@ gco gcb gsw gsc
+Switch or create a Git branch.
+  gco NAME -> git checkout NAME
+  gcb NAME -> git checkout -b NAME
+  gsw NAME -> git switch NAME
+  gsc NAME -> git switch -c NAME
+  checkout -b and switch -c create a branch and switch to it.
+  checkout also accepts file-restoration forms; switch focuses on branches.
+
+@@ gf gpl gps gpsu
+Synchronize an ordinary project repository.
+  gf   -> git fetch --all --prune
+  gpl  -> git pull --rebase
+  gps  -> git push
+  gpsu -> git push -u origin HEAD
+  fetch downloads remote history; --prune removes stale remote-tracking refs.
+  pull --rebase fetches and replays local commits over upstream history.
+  push uploads commits. -u records an upstream; HEAD means the current branch here.
+  For shell configuration, shcfgpull uses its own checkout and fast-forward only.
+
+@@ gstash gst gsta gstp gstd gstc
+Save and restore unfinished Git changes.
+  gstash "Message" -> git stash push -u -m "Message"
+  gst              -> git stash list
+  gsta             -> git stash apply
+  gstp             -> git stash pop
+  gstd             -> git stash drop
+  gstc             -> git stash clear
+  -u includes untracked files; -m supplies a label. apply keeps the saved stash;
+  pop removes it after successful application. drop deletes one; clear deletes all.
+  apply, pop and drop accept a stash reference, such as 'stash@{0}'.
+
+@@ grs grss
+Restore or unstage files.
+  grs FILE  -> git restore FILE
+  grss FILE -> git restore --staged FILE
+  restore discards unstaged file edits by restoring from the index.
+  --staged changes the index instead, normally leaving working files untouched.
+
+@@ grb grbi gmg gmc gab gmb
+Integrate Git history or control an operation in progress.
+  grb  -> git rebase
+  grbi -> git rebase -i
+  gmg  -> git merge
+  gmc  -> git merge --continue
+  gab  -> git rebase --abort
+  gmb  -> git merge --abort
+  Rebase replays commits and changes their identities. -i opens an editable plan.
+  Merge combines histories. --continue resumes after resolving conflicts;
+  --abort attempts to return to the state before the operation.
+
+@@ gconf gaddconf
+Find and stage conflicted files.
+  gconf    -> git diff --name-only --diff-filter=U
+  gaddconf -> git add $(git diff --name-only --diff-filter=U 2>/dev/null)
+  --name-only prints paths; U selects unmerged paths. $(...) substitutes output;
+  2>/dev/null hides errors from that inner diff. gaddconf splits on whitespace,
+  so use git add -- "path with spaces" for such filenames. Resolve contents first.
+
+@@ ls ll lla
+List files, using eza when installed.
+  ls  -> eza --group-directories-first
+  ll  -> eza -lah --group-directories-first
+  lla -> eza -la --group-directories-first
+  -l means detailed listing, -a includes hidden entries, -h uses readable sizes.
+  Without eza, ll and lla use ls; the ls command itself stays unchanged.
+
+@@ cat bat
+Read files with syntax highlighting when bat or batcat is available.
+  cat FILE -> bat --style=numbers --paging=never FILE
+  On systems that package bat as batcat, cat uses batcat and bat aliases batcat.
+  --style=numbers shows line numbers; --paging=never prints without a pager.
+  command cat FILE bypasses the alias and invokes the original cat command.
+
+@@ grep
+Search text with ripgrep when installed.
+  grep PATTERN PATH -> rg PATTERN PATH
+  rg searches recursively by default and respects ignore files.
+  It has its own syntax and behavior; command grep invokes the original grep.
+
+@@ rm cp mv
+Apply the configured confirmation options to file operations.
+  rm -> rm -I --preserve-root
+  cp -> cp -i
+  mv -> mv -i
+  rm -I asks once for recursive removal or more than three files; it does not
+  confirm every deletion. --preserve-root protects /. cp/mv -i ask before overwrite.
+  command TOOL bypasses an alias. These operations still change or delete files.
+
+@@ .. ... doc cdpg cdtemp cdsh cdshc cdshcfg shell_config c
+Navigate or clear the terminal.
+  .. / ...               -> cd .. / cd ../..
+  doc                    -> cd "$HOME/Documents/"
+  cdpg / cdtemp          -> cd "$HOME/Documents/playground[/temp]/"
+  cdsh                   -> cd "$HOME/Documents/bash/shell"
+  cdshc / cdshcfg         -> cd "$HOME/.zsh_config/"
+  shell_config           -> builtin cd -- ~shell_config
+  c                      -> clear
+  ~shell_config is a Zsh named directory pointing at the configured module folder.
+  builtin cd selects Zsh's built-in command; -- ends option parsing.
+  cdtemp changes directory without clearing any files.
+
+@@ tp
+Choose among known destinations, then change directory in the current shell.
+  tp        -> show a menu
+  tp c      -> enter the Documents/codes folder
+  tp -s ssh -> list matching destinations
+  tp ssh    -> enter the best substring match
+  tp -f     -> choose through fzf
+  The function resolves XDG Documents when available, otherwise ~/Documents.
+  Keys: c/p=codes, t=codes/temp, i=config, d=Downloads, n=notes,
+  b=local bin, s=SSH, h=home, q=quit. tp t asks before deleting temp contents.
+  For a direct equivalent, use cd -- "DESTINATION". A function is needed because
+  an external program cannot change its parent shell's working directory.
+
+@@ TSH tsh
+Reset a dedicated scratch directory and enter it in the current shell.
+  Destination: "$HOME/Documents/shell/temp_session"
+  Every invocation deletes prior contents, including hidden files and subfolders.
+  The function checks path components, creates the folder, enters it, and removes
+  its contents. It refuses symlinked path components and does not follow links
+  inside the workspace when clearing. tsh calls TSH. Neither creates a new shell.
+  To inspect the clearing helper too: unexp _tp_empty_dir_contents
+
+@@ check_recent_files
+List files by most recent modification, using GNU find.
+  check_recent_files DIR ->
+    find DIR -type f -printf '%T@ %T+ %p\n' | sort -nr | cut -d' ' -f2-
+  -type f selects regular files. %T@ provides a numeric modification timestamp;
+  %T+ and %p provide the displayed time and path. sort -nr sorts numeric values
+  in descending order; cut removes the leading numeric field.
+
+@@ rand random rint
+Generate a random whole number.
+  rand        -> 1 through 100
+  rand 6      -> 1 through 6
+  rand -5 5   -> -5 through 5
+  random and rint call rand. The helper swaps reversed bounds, combines two Zsh
+  RANDOM values, and maps the result into the inclusive range using modulo (%).
+  It is a convenience generator; do not use it for passwords or security tokens.
+
+@@ install ping
+Apply common command options.
+  install PACKAGE -> sudo apt update && sudo apt install PACKAGE
+  ping HOST       -> ping -c 4 HOST
+  apt update refreshes package metadata; && runs installation only after success.
+  sudo elevates privileges. This install alias changes the system, and shadows
+  the standard install file-copy command; command install invokes that command.
+  ping -c 4 sends four probes rather than running indefinitely.
+
+@@ shcfg zshcfg shcfghelp shcfgcheck chkv shcfgpull shcfgpush
+Manage the shell configuration's permanent Git checkout from any directory.
+  shcfg           -> zshcfg
+  shcfghelp       -> zshcfg commands
+  shcfgcheck/chkv -> zshcfg check
+  shcfgpull       -> zshcfg pull
+  shcfgpush       -> zshcfg push
+  check fetches and compares history. pull accepts a clean, fast-forward update.
+  push validates syntax, asks for a message, stages managed files, commits and
+  pushes. Private local.zsh is excluded. These operations target the configuration
+  checkout rather than whichever project directory is currently open.
+
+@@ unexp
+Reveal a shortcut without running it.
+  unexp          -> browse lessons and, in an interactive Zsh, enter a name
+  unexp NAME     -> show its active definition and available reference notes
+  unexp --list   -> list reference lessons
+  shcfg unexp NAME -> show repository reference notes from the configuration CLI
+  Alias/function definitions are read as text. Reference lessons describe the
+  repository defaults; active definitions can differ after plugins or local edits.

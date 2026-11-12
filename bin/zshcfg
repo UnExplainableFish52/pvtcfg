@@ -25,6 +25,7 @@ Usage:
   zshcfg publish force       Same as push force
   zshcfg help                Show this help
   zshcfg commands            List shell shortcuts, functions and key bindings
+  zshcfg unexp [NAME]        Explain a shortcut, or list learning topics
 
 chkv is also a shell alias for zshcfg check.
 shcfgpush is a shell shortcut for zshcfg push (accepts -m MESSAGE).
@@ -238,5 +239,8 @@ case "$action" in
   commands)
     (( $# == 1 )) || fail 'Usage: zshcfg commands'
     command cat -- "$REPO/bin/commands.txt" ;;
+  unexp)
+    shift
+    bash "$REPO/bin/unexp" "$@" ;;
   *) usage >&2; exit 2 ;;
 esac

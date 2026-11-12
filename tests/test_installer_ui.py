@@ -47,11 +47,12 @@ class InstallerUI(unittest.TestCase):
         seed = self.fixture / 'seed'
         seed.mkdir()
         for name in ('.zshrc', '.p10k.zsh', '.nanorc', 'VERSION', '.gitattributes',
-                     '.gitignore', 'install.sh', 'bin/zshcfg', 'bin/commands.txt'):
+                     '.gitignore', 'install.sh'):
             target = seed / name
             target.parent.mkdir(exist_ok=True, parents=True)
             shutil.copyfile(ROOT / name, target)
         shutil.copytree(ROOT / 'zsh', seed / 'zsh')
+        shutil.copytree(ROOT / 'bin', seed / 'bin')
         if animated:
             source = self.source.replace('init_style\n', 'init_style\nset_palette truecolor\n', 1)
             (seed / 'install.sh').write_text(source, encoding='utf-8', newline='\n')

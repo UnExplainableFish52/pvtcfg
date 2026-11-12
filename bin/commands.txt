@@ -102,6 +102,10 @@ FILES AND DEFAULTS
   Plugins                    git, zsh-autosuggestions, zsh-syntax-highlighting
 
 DISCOVERY
+  unexp                      Browse shortcut lessons; enter a name in interactive Zsh
+  unexp NAME                 Reveal an active alias/function and explain its default
+  unexp --list               List all reference lessons
+  shcfg unexp NAME           Read a reference lesson through the configuration CLI
   alias                      Show active aliases, including plugins/local overrides
   functions NAME             Print a function definition (for example functions tp)
   functions                  Print all loaded function definitions

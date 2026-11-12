@@ -44,11 +44,12 @@ class Publish(unittest.TestCase):
                         GIT_AUTHOR_NAME='Config test', GIT_AUTHOR_EMAIL='test@example.invalid',
                         GIT_COMMITTER_NAME='Config test', GIT_COMMITTER_EMAIL='test@example.invalid')
         for name in ('.zshrc', '.nanorc', '.p10k.zsh', 'VERSION', '.gitignore',
-                     '.gitattributes', 'install.sh', 'bin/zshcfg', 'bin/commands.txt'):
+                     '.gitattributes', 'install.sh'):
             dest = self.repo / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, dest)
         shutil.copytree(ROOT / 'zsh', self.repo / 'zsh')
+        shutil.copytree(ROOT / 'bin', self.repo / 'bin')
         self.git(self.repo, 'init', '-b', 'main')
         self.git(self.repo, 'add', '.')
         self.git(self.repo, 'commit', '-m', 'Initial config')
